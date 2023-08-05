@@ -3,6 +3,7 @@ import commands
 import events
 
 LOAD_EVENTS = [
+    "on_ready",
 ]
 LOAD_COMMANDS = [
     "create_ctf",
