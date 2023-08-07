@@ -1,7 +1,7 @@
 # Adds a member to the role for this ctf
 # Can be run from a ctf category channel
 #   by a management member or ctf operator
-import bot
+import core.bot as bot
 import discord
 from discord import app_commands
 from error_handlers.permissions import check_role_error

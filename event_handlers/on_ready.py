@@ -1,6 +1,7 @@
-import commands
-import bot
+import logging
+import core.commands as commands
+import core.bot as bot
 
 async def handle():
     await commands.register()
-    print(f'Logged on as {bot.client.user}!')
+    logging.getLogger("bot").info(f"Logged on as {bot.client.user}!")

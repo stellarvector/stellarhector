@@ -1,7 +1,7 @@
 # Creates a challenge channel
 # Can be run from a ctf category channel
 #   by all players of this ctf (i.e. having the ctf role)
-import bot
+import core.bot as bot
 import discord
 from discord import app_commands
 from utils.ctf import get_new_channel_position
@@ -20,7 +20,7 @@ async def create_challenge(interaction: discord.Interaction, name: str, category
     ctf_role = discord.utils.get(interaction.guild.roles, name=ctf_category.name)
 
     if not ctf_role or interaction.user.get_role(ctf_role.id) is None:
-        await interaction.response.send_message("You are not playing this CTF so you can't add a challenge.\nIf you are playing please ask an admin.", ephemeral=True)
+        await interaction.followup.edit_message(message_id, content="You are not playing this CTF so you can't add a challenge.\nIf you are playing please ask an admin.", ephemeral=True)
         return
 
     channel = await create_challenge_channel(interaction, f"{category}-{name}", ctf_category)

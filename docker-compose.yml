@@ -4,4 +4,5 @@ services:
   build: .
   volumes:
     - .:/usr/src/stellarhector/.
+  restart: always
   entrypoint: python3 ./main.py
