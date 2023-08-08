@@ -1,6 +1,6 @@
 # Adds a member to the role for this ctf
 # Can be run from a ctf category channel
-#   by a management member or ctf operator
+#   by an administrator or ctf operator
 import core.bot as bot
 import discord
 from discord import app_commands
@@ -12,7 +12,6 @@ from error_handlers.default import default as default_error_handler
 @app_commands.describe(player="Player")
 @app_commands.checks.has_any_role(
     bot.config.get("ADMIN_ROLE"),
-    bot.config.get("ADVISOR_ROLE"),
     bot.config.get("CTF_OPERATOR_ROLE")
 )
 async def add_player(interaction, player: discord.Member):
