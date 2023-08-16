@@ -32,3 +32,10 @@ async def unsolve(interaction):
 
     await interaction.channel.edit(name=new_name, position=new_position)
     await interaction.response.send_message(f"Awww, it turned out this wasn't a solve after all :pensive:")
+
+@unsolve.error
+async def error_on_create_challenge_command(interaction, error):
+    if await check_role_error(interaction, error):
+        return
+
+    await default_error_handler(interaction, error)

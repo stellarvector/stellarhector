@@ -33,3 +33,10 @@ async def solved(interaction, flag: str):
 
     await interaction.channel.edit(name=new_name,position=new_position)
     await interaction.followup.edit_message(message_id, content=f"Nice, great work! :partying_face:\nSolved by {interaction.user.mention} with `{flag}`.")
+
+@solved.error
+async def error_on_create_challenge_command(interaction, error):
+    if await check_role_error(interaction, error):
+        return
+
+    await default_error_handler(interaction, error)
