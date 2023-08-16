@@ -9,6 +9,7 @@ LOAD_EVENTS = [
     "on_ready",
 ]
 LOAD_COMMANDS = [
+    "help",
     "create_ctf",
     "create_challenge",
     "add_player",
