@@ -21,7 +21,7 @@ LOAD_COMMANDS = [
 
 def init_logging():
     log_formatter = logging.Formatter("[%(asctime)s][%(levelname)-8s] %(message)-80s\t[%(pathname)s:%(funcName)s:%(lineno)d]")
-    log_file = "./data/logs/debug.log"
+    log_file = bot.config.get("LOG_FILE")
     megabyte = 1024*1024
 
     log_handler = RotatingFileHandler(log_file, mode='a', maxBytes=5*megabyte, backupCount=10, encoding='utf-8', delay=False)
