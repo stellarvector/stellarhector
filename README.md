@@ -1,4 +1,4 @@
-# StellarHector
+# Stellar Hector
 
 Stellar Vector's personal Butler!
 
@@ -6,6 +6,7 @@ Stellar Vector's personal Butler!
 
 1. `cp .env.example .env`
 2. Fill in all details in the `.env` file
-3. `docker-compose build && docker-compose up -d`
+3. `docker-compose build`
+4. `docker-compose up -d`
 
 That's all!
