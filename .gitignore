@@ -1,4 +1,5 @@
 .env
+*.prod
 __pycache__
 venv
 data

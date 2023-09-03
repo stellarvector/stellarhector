@@ -1,0 +1,15 @@
+{% extends 'base.html' %}
+
+{% block title %}{{ challenge_name }} ({{ year }} / {{ ctf_name}}) - {{ super() }}{% endblock %}
+{% block stylesheet_level %}../../{{ super() }}{% endblock %}
+
+{% block content %}
+    <div id="title"><span id="hashtag">#</span><h1>{{ challenge_name }}</h1></div>
+    {% for message in messages -%}
+        {% if message.is_thread %}
+            {% include 'thread.html' %}
+        {% else %}
+            {% include 'message.html' %}
+        {% endif %}
+    {% endfor %}
+{% endblock %}

@@ -1,2 +1,8 @@
 discord
 python-dotenv
+jinja2
+markdown
+pymdown-extensions
+nh3
+emoji
+gitpython

@@ -1,0 +1,11 @@
+<div id="navigation">
+    <div id="navtitle">
+        <div id="backbtn"><a href="../index.html">&lt;</a></div>
+        <span id="ctf">{{ year }} / {{ ctf_name }}</span>
+    </div>
+    <ul>
+        {% for challenge in challenges -%}
+        <li><a href="{{ challenge.link }}"># {{ challenge.name }}</a></li>
+        {% endfor %}
+    </ul>
+</div>

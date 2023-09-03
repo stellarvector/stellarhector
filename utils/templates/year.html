@@ -1,0 +1,21 @@
+{% extends 'base.html' %}
+
+{% block title %}{{ year }} - {{ super() }}{% endblock %}
+{% block stylesheet_level %}../{{ super() }}{% endblock %}
+
+{% block navigation %}
+    <div id="navigation">
+        <div id="navtitle">
+            <div id="backbtn"><a href="../index.html">&lt;</a></div>
+            <span id="ctf">Select a ctf</span>
+        </div>
+        <ul>
+            <!--add-ctf-->
+        </ul>
+    </div>
+{% endblock %}
+
+{% block content %}
+    <div id="title"><span id="hashtag" class="emoji">📆</span><h1>{{ year }} Archives</h1></div>
+    <p>Select a CTF we played in {{ year }} on the left.</p>
+{% endblock %}

@@ -1,0 +1,43 @@
+
+<div class="msg" id="{{ message.direct.id }}">
+    <div class="avatar">
+        <img
+            src="{{ message.direct.author.display_avatar.url }}"
+            alt="{{ message.direct.author.display_name }}'s avatar">
+    </div>
+    <div class="msg-content">
+        {% if message.direct.interaction %}
+        <span class="interaction">
+            {{ message.direct.interaction.user.display_name }} used /{{ message.direct.interaction.name }}
+        </span>
+        {% endif %}
+        {% if message.direct.reference and message.direct.reference.message_id %}
+        <span class="reference">
+            <a href="#{{ message.direct.reference.message_id }}">jump to reference</a>
+        </span>
+        {% endif %}
+        <span class="header">
+            <span class="author" style="color: {{ message.direct.author.color }}"
+                    title="@{{ message.direct.author.name }}">
+                {{ message.direct.author.display_name }}
+                {% if message.direct.author.bot %} <span class="bot-label">BOT</span>{% endif %}
+            </span>
+            <span class="timestamp">
+                {{ message.timestamp() }}
+                {% if message.edit_timestamp() %}<span title="{{ message.edit_timestamp() }}"> (edited)</span>{% endif %}
+            </span>
+            {% if message.direct.pinned %}<span class="pinned">📌</span>{% endif %}
+        </span>
+        <p class="body">
+            {{ message.safe_body() | safe }}
+            {% if message.direct.stickers %}
+                Used a sticker
+            {% endif %}
+        </p>
+        <div class="reactions">
+            {%- for reaction in message.direct.reactions %}
+                <span>{{ reaction.emoji }} {{ reaction.count }}</span>
+            {% endfor %}
+        </div>
+    </div>
+</div>

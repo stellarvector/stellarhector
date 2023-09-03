@@ -7,7 +7,7 @@ import discord
 
 @bot.client.tree.command(name="help", description="Show the possible commands", guild=bot.guild)
 async def create_challenge(interaction: discord.Interaction):
-    await interaction.response.send_message(f"""Hi there :wave:
+    help_message = f"""Hi there :wave:
 These are the commands I understand:
 `/create-challenge` - Create a challenge channel: Use in the main channel of a CTF and provide the name and category of the challenge.
 `/solved` - Mark a challenge as solved: Use in any challenge channel and provide the flag as proof.
@@ -16,4 +16,7 @@ These are the commands I understand:
 In order to do one of the following things, **ask an admin**:
 * You really want to join in playing this CTF, but have not been added yet.
 * You would like to play a specific CTF that is not in our planning.
-* You mistakenly marked a challenge as solved and would like to revert it.""", ephemeral=True)
+* You mistakenly marked a challenge as solved and would like to revert it.
+* You played in a CTF and would like to review the discussion from a Discord challenge channel."""
+
+    await interaction.response.send_message(help_message, ephemeral=True)

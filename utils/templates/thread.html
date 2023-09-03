@@ -1,0 +1,8 @@
+<details open>
+<summary>Thread (click to expand): {{ message.name }}</summary>
+<hr>
+{% for message in message.messages %}
+    {% include 'message.html' %}
+{% endfor %}
+<hr>
+</details>

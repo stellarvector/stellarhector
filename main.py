@@ -16,6 +16,7 @@ LOAD_COMMANDS = [
     "remove_player",
     "solved",
     "unsolve",
+    "archive_ctf",
 ]
 
 
