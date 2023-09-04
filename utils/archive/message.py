@@ -1,6 +1,7 @@
 import discord
 import core.bot as bot
 import datetime
+import pytz
 import markdown
 import emoji
 import nh3
@@ -20,7 +21,7 @@ class MessageArchive():
 
     def timestamp(self):
         time = self.__message.created_at
-        time = pytz.utc.localize(time).astimezone("Europe/Brussels")
+        time = time.astimezone(pytz.timezone("Europe/Brussels"))
 
         return time.strftime('%Y-%m-%d %H:%M:%S')
 
@@ -29,7 +30,7 @@ class MessageArchive():
 
         if self.__message.edited_at is not None:
             time = self.__message.edited_at
-            time = pytz.utc.localize(time).astimezone("Europe/Brussels")
+            time = time.astimezone(pytz.timezone("Europe/Brussels"))
             time = time.strftime('%Y-%m-%d %H:%M:%S')
 
         return time
