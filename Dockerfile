@@ -3,7 +3,8 @@ FROM ubuntu
 RUN apt update && \
     apt install -y \
     python3 \
-    pip
+    pip \
+    git
 RUN apt-get clean
 
 RUN mkdir /usr/src/stellarhector
