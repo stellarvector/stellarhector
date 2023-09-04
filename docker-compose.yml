@@ -3,6 +3,8 @@ services:
  bot:
   build: .
   volumes:
+    - /home/ubuntu/.ssh/.:/home/sv-archiver/.ssh/.
     - .:/usr/src/stellarhector/.
   restart: always
+  user: 1000:1000
   entrypoint: python3 ./main.py
