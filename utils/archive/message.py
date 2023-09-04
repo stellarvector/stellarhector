@@ -19,13 +19,18 @@ class MessageArchive():
         return self
 
     def timestamp(self):
-        return self.__message.created_at.strftime('%Y-%m-%d %H:%M:%S')
+        time = self.__message.created_at
+        time = pytz.utc.localize(time).astimezone("Europe/Brussels")
+
+        return time.strftime('%Y-%m-%d %H:%M:%S')
 
     def edit_timestamp(self):
         time = False
 
         if self.__message.edited_at is not None:
-            time = self.__message.edited_at.strftime('%Y-%m-%d %H:%M:%S')
+            time = self.__message.edited_at
+            time = pytz.utc.localize(time).astimezone("Europe/Brussels")
+            time = time.strftime('%Y-%m-%d %H:%M:%S')
 
         return time
 
