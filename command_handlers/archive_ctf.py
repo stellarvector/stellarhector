@@ -5,6 +5,8 @@ import core.bot as bot
 import discord
 from discord import app_commands
 from utils.archive.ctf import CtfArchive
+from error_handlers.permissions import check_role_error
+from error_handlers.default import default as default_error_handler
 
 
 @bot.client.tree.command(name="archive-ctf", description="Archive a CTF", guild=bot.guild)
@@ -29,3 +31,10 @@ async def archive_ctf(interaction: discord.Interaction, name: str):
     archive.save()
 
     await interaction.edit_original_response(content=f"{interaction.user.mention} archived {name}")
+
+@archive_ctf.error
+async def archive_ctf_error(interaction, error):
+    if await check_role_error(interaction, error):
+        return
+
+    await default_error_handler(interaction, error)
