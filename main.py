@@ -13,10 +13,11 @@ LOAD_COMMANDS = [
     "create_ctf",
     "create_challenge",
     "add_player",
+    "remove_ctf",
     "remove_player",
     "solved",
     "unsolve",
-    "archive_ctf",
+    "archive_ctf"
 ]
 
 
