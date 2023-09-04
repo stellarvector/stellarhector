@@ -1,5 +1,6 @@
 discord
 python-dotenv
+pytz
 jinja2
 markdown
 pymdown-extensions
