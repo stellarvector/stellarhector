@@ -9,7 +9,7 @@ class ThreadArchive():
         self.__thread: discord.Thread = thread
         self.__messages: list[MessageArchive] = [
             await MessageArchive.init(message)
-                async for message in thread.history(oldest_first=True)
+                async for message in thread.history(limit=None, oldest_first=True)
         ]
 
         return self

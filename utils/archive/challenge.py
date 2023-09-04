@@ -13,7 +13,7 @@ class ChallengeArchive():
         self.__challenge: discord.TextChannel = challenge
         self.__messages: list[MessageArchive] = [
             await MessageArchive.init(message)
-                async for message in self.__challenge.history(oldest_first=True)
+                async for message in self.__challenge.history(limit=None, oldest_first=True)
         ]
         self.__threads: dict[int,ThreadArchive] = {
             thread.id: await ThreadArchive.init(thread)
@@ -21,7 +21,7 @@ class ChallengeArchive():
         }
         self.__threads.update({
             thread.id: await ThreadArchive.init(thread)
-                async for thread in self.__challenge.archived_threads()
+                async for thread in self.__challenge.archived_threads(limit=None)
         })
 
         return self
