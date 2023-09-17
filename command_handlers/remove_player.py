@@ -15,18 +15,17 @@ from error_handlers.default import default as default_error_handler
     bot.config.get("CTF_OPERATOR_ROLE")
 )
 async def add_player(interaction, player: discord.Member):
-    await interaction.response.defer()
-    message_id = interaction.channel.last_message_id
+    await interaction.response.defer(thinking=True, ephemeral=True)
 
     role_name = interaction.channel.category.name
     ctf_role = discord.utils.get(interaction.guild.roles, name=role_name)
 
     if not ctf_role:
-        await interaction.followup.edit_message(message_id, content=f"Please execute this command in a CTF category.")
+        await interaction.edit_original_response(content=f"Please execute this command in a CTF category.")
         return
 
     await player.remove_roles(ctf_role)
-    await interaction.followup.edit_message(message_id, content=f"{player.mention} was removed as player from `{role_name}`")
+    await interaction.edit_original_response(content=f"{player.mention} was removed as player from `{role_name}`")
 
 @add_player.error
 async def add_player_error(interaction, error):

@@ -17,6 +17,6 @@ In order to do one of the following things, **ask an admin**:
 * You really want to join in playing this CTF, but have not been added yet.
 * You would like to play a specific CTF that is not in our planning.
 * You mistakenly marked a challenge as solved and would like to revert it.
-* You played in a CTF and would like to review the discussion from a Discord challenge channel."""
+* You played in a CTF and would like to review the discussion from a Discord challenge channel that is not visible anymore."""
 
     await interaction.response.send_message(help_message, ephemeral=True)

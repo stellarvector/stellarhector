@@ -15,8 +15,7 @@ from error_handlers.default import default as default_error_handler
 )
 @app_commands.describe(name="The CTF name")
 async def create_ctf(interaction: discord.Interaction, name: str):
-    await interaction.response.defer()
-    message_id = interaction.channel.last_message_id
+    await interaction.response.defer(thinking=True)
 
     admin_role: discord.Role = discord.utils.get(interaction.guild.roles, name=bot.config.get("ADMIN_ROLE"))
     member_role: discord.Role = discord.utils.get(interaction.guild.roles, name=bot.config.get("MEMBER_ROLE"))
@@ -25,7 +24,7 @@ async def create_ctf(interaction: discord.Interaction, name: str):
     ctf_category = await create_ctf_category(interaction, "⚡ " + name, member_role, ctf_role, admin_role)
     ctf_main_channel = await create_ctf_main_channel(interaction, name, ctf_category)
 
-    await interaction.followup.edit_message(message_id, content=f"Done: CTF boilerplate is set up :raised_hands:\nGo to the {ctf_main_channel.mention} channel to start adding challenges.")
+    await interaction.edit_original_response(content=f"Done: CTF boilerplate is set up :raised_hands:\nGo to the {ctf_main_channel.mention} channel to start adding challenges.")
 
 async def create_ctf_role(interaction, name, member_role):
     role_color = discord.Color(int(bot.config.get("CTF_ROLE_COLOR_HEX"),16))

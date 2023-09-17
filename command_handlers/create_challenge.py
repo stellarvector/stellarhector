@@ -13,20 +13,18 @@ from error_handlers.default import default as default_error_handler
 @app_commands.describe(name="The challenge name")
 @app_commands.describe(category="The category (web,crypto,pwn,rev,...)")
 async def create_challenge(interaction: discord.Interaction, name: str, category: str):
-    await interaction.response.defer()
-    message_id = interaction.channel.last_message_id
+    await interaction.response.defer(thinking=True, ephemeral=True)
 
     ctf_category = interaction.channel.category
     ctf_role = discord.utils.get(interaction.guild.roles, name=ctf_category.name)
 
     if not ctf_role or interaction.user.get_role(ctf_role.id) is None:
-        await interaction.followup.edit_message(message_id, content="You are not playing this CTF so you can't add a challenge.\nIf you are playing please ask an admin.")
+        await interaction.edit_original_response(content="You are not playing this CTF so you can't add a challenge.\nIf you are playing please ask an admin.")
         return
 
     channel = await create_challenge_channel(interaction, f"{category}-{name}", ctf_category)
 
-    await interaction.followup.edit_message(message_id,
-        content=f"Done; {channel.mention} created!\nGo solve that thing :muscle:")
+    await interaction.edit_original_response(content=f"Done; {channel.mention} created!\nGo solve that thing :muscle:")
 
 async def create_challenge_channel(interaction, name, ctf_category):
     new_position = get_new_channel_position(ctf_category,name)
