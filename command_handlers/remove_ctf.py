@@ -15,7 +15,7 @@ from error_handlers.default import default as default_error_handler
 async def remove_ctf(interaction: discord.Interaction, name: str):
     await interaction.response.defer(thinking=True)
 
-    archive_path = bot.config.get("ARCHIVE_PATH")
+    archive_path = bot.config.get("ARCHIVE_LOCAL_PATH")
     year = datetime.datetime.now().year
     force = False
 

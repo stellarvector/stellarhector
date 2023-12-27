@@ -86,5 +86,5 @@ class MessageArchive():
         for attachment in self.__message.attachments:
             urlretrieve(
                 attachment.url,
-                f"{bot.config.get('ARCHIVE_PATH')}{attachment_path}/{attachment.id}_{attachment.filename}"
+                f"{bot.config.get('ARCHIVE_LOCAL_PATH')}{attachment_path}/{attachment.id}_{attachment.filename}"
             )

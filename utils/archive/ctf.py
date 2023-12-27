@@ -9,6 +9,9 @@ class CtfArchive():
     async def init(cls, ctf, challenges):
         self = CtfArchive()
 
+        # First sync archive repository
+        _ = self.get_archive_repository()
+
         self.name = ctf
         self.year = datetime.datetime.now().year
         self.__challenges: list[ChallengeArchive] = [
@@ -19,7 +22,7 @@ class CtfArchive():
         return self
 
     def generate_files(self):
-        archive_path = bot.config.get("ARCHIVE_PATH")
+        archive_path = bot.config.get("ARCHIVE_LOCAL_PATH")
 
         self.add_year_if_necessary(archive_path)
         ctf_path = self.create_ctf_path(archive_path)
@@ -46,7 +49,8 @@ class CtfArchive():
                 f.write(challenge_html)
 
     def add_year_if_necessary(self, archive_path):
-        if os.path.exists(f"{archive_path}/{self.year}/"):
+        year_folder_path = os.path.join(archive_path, str(self.year))
+        if os.path.exists(year_folder_path):
             return
 
         os.makedirs(f"{archive_path}/{self.year}")
@@ -54,7 +58,8 @@ class CtfArchive():
         year_link_template = bot.jinja_env.get_template("yearlink.html")
         year_link_html = year_link_template.render(year=self.year)
 
-        with open(f"{archive_path}/index.html", "r+") as index_file:
+        index_path = os.path.join(archive_path, "index.html")
+        with open(index_path, "r+") as index_file:
             index_html = index_file.read()
             index_file.seek(0)
             index_html = index_html.replace("<!--add-year-->", year_link_html)
@@ -63,7 +68,8 @@ class CtfArchive():
         year_template = bot.jinja_env.get_template("year.html")
         year_html = year_template.render(year=self.year)
 
-        with open(f"{archive_path}/{self.year}/index.html", "w+") as year_file:
+        year_index_path = os.path.join(archive_path, str(self.year), "index.html")
+        with open(year_index_path, "w+") as year_file:
             year_file.write(year_html)
 
     def create_ctf_path(self, archive_path):
@@ -83,18 +89,32 @@ class CtfArchive():
         ctf_link_template = bot.jinja_env.get_template("ctflink.html")
         ctf_link_html = ctf_link_template.render(ctf={"link": f"./{ctf_path}/{self.__challenges[0].name}.html", "name": self.name})
 
-        with open(f"{archive_path}/{self.year}/index.html", "r+") as year_file:
+        year_index_path = os.path.join(archive_path, str(self.year), "index.html")
+        with open(year_index_path, "r+") as year_file:
             year_html = year_file.read()
             year_file.seek(0)
             year_html = year_html.replace("<!--add-ctf-->", ctf_link_html)
             year_file.write(year_html)
 
     def save(self):
+        repository = CtfArchive.get_archive_repository()
         if int(bot.config.get("SHOULD_COMMIT")):
-            repository = Repo(bot.config.get("GIT_PATH"))
+            repository = Repo(bot.config.get("ARCHIVE_LOCAL_PATH"))
             repository.index.add('*')
             repository.index.commit(f"Archive {self.name} {self.year}")
 
             if int(bot.config.get("SHOULD_PUSH")):
                 origin = repository.remote(name="origin")
                 origin.push()
+
+    @staticmethod
+    def get_archive_repository():
+        if not os.path.exists(bot.config.get("ARCHIVE_LOCAL_PATH")):
+            # Clone repository if not present locally
+            repo = Repo.clone_from(bot.config.get("ARCHIVE_REMOTE_URL"), bot.config.get("ARCHIVE_LOCAL_PATH"))
+            return repo
+        else:
+            # Pull potential changes from repository
+            repo = Repo(bot.config.get("ARCHIVE_LOCAL_PATH"))
+            repo.remotes.origin.pull()
+            return repo
