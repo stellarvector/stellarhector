@@ -22,7 +22,7 @@ async def create_ctf(interaction: discord.Interaction, name: str):
 
     ctf_role = await create_ctf_role(interaction, "⚡ " + name, member_role)
     ctf_category = await create_ctf_category(interaction, "⚡ " + name, member_role, ctf_role, admin_role)
-    ctf_main_channel = await create_ctf_main_channel(interaction, name, ctf_category)
+    ctf_main_channel = await create_ctf_main_channel(interaction, name, ctf_category, member_role, ctf_role, admin_role)
 
     await interaction.edit_original_response(content=f"Done: CTF boilerplate is set up :raised_hands:\nGo to the {ctf_main_channel.mention} channel to start adding challenges.")
 
@@ -42,7 +42,7 @@ async def create_ctf_category(interaction, name, member_role, ctf_role, admin_ro
         name,
         overwrites={
             interaction.guild.default_role: discord.PermissionOverwrite(read_messages=False,view_channel=False,manage_channels=False),
-            member_role: discord.PermissionOverwrite(read_messages=True,view_channel=True),
+            member_role: discord.PermissionOverwrite(read_messages=False,view_channel=False),
             ctf_role: discord.PermissionOverwrite(read_messages=True,view_channel=True),
             admin_role: discord.PermissionOverwrite(read_messages=True,view_channel=True,manage_channels=True)
         },
@@ -51,9 +51,17 @@ async def create_ctf_category(interaction, name, member_role, ctf_role, admin_ro
 
     return ctf_category
 
-async def create_ctf_main_channel(interaction, name, ctf_category):
-    ctf_main_channel = await interaction.guild.create_text_channel(name, category=ctf_category)
-    await ctf_main_channel.edit(sync_permissions=True, position=1)
+async def create_ctf_main_channel(interaction, name, ctf_category, member_role, ctf_role, admin_role):
+    ctf_main_channel = await interaction.guild.create_text_channel(
+        name,
+        category=ctf_category,
+        overwrites={
+            interaction.guild.default_role: discord.PermissionOverwrite(read_messages=False,view_channel=False,manage_channels=False),
+            member_role: discord.PermissionOverwrite(read_messages=True,view_channel=True),
+            ctf_role: discord.PermissionOverwrite(read_messages=True,view_channel=True),
+            admin_role: discord.PermissionOverwrite(read_messages=True,view_channel=True,manage_channels=True)
+        })
+    await ctf_main_channel.edit(sync_permissions=True, position=1, )
 
     return ctf_main_channel
 
