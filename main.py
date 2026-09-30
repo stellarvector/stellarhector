@@ -18,6 +18,7 @@ LOAD_COMMANDS = [
     "solved",
     "unsolve",
     "archive_ctf",
+    "archive_channel",
     "release_ctf"
 ]
 

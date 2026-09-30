@@ -1,0 +1,21 @@
+{% extends 'base.html' %}
+
+{% block title %}Channels - {{ super() }}{% endblock %}
+{% block stylesheet_level %}../{{ super() }}{% endblock %}
+
+{% block navigation %}
+    <div id="navigation">
+        <div id="navtitle">
+            <div id="backbtn"><a href="../index.html">&lt;</a></div>
+            <span id="ctf">Select a channel</span>
+        </div>
+        <ul>
+            <!--add-channel-->
+        </ul>
+    </div>
+{% endblock %}
+
+{% block content %}
+    <div id="title"><span id="hashtag" class="emoji">💬</span><h1>Channel Archives</h1></div>
+    <p>Select an archived channel on the left.</p>
+{% endblock %}
