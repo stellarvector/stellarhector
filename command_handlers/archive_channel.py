@@ -64,11 +64,14 @@ async def archive_channel(interaction: discord.Interaction, channel_id: str):
     # Sync the archive repository so the check sees the latest archives
     _ = CtfArchive.get_archive_repository()
 
+    category = ChannelArchive.category_folder(channel)
+    archive_name = ChannelArchive.channel_folder(channel)
+
     overwrite = False
-    if ChannelArchive.is_archived(channel.name):
+    if ChannelArchive.is_archived(category, archive_name):
         view = ArchiveConflictView(interaction.user)
         await interaction.edit_original_response(
-            content=f":warning: {channel.mention} has already been archived. Overwrite the existing archive, or keep both (the new archive gets a numbered suffix, e.g. `{channel.name}-2`)?",
+            content=f":warning: {channel.mention} has already been archived. Overwrite the existing archive, or keep both (the new archive gets a numbered suffix, e.g. `{category}/{archive_name}-2`)?",
             view=view)
 
         if await view.wait():
@@ -81,7 +84,7 @@ async def archive_channel(interaction: discord.Interaction, channel_id: str):
     archive.generate_files(overwrite)
     archive.save()
 
-    await interaction.edit_original_response(content=f"{interaction.user.mention} archived {channel.mention} as `{archive.archive_name}`")
+    await interaction.edit_original_response(content=f"{interaction.user.mention} archived {channel.mention} as `{archive.category}/{archive.archive_name}`")
 
 @archive_channel.error
 async def archive_channel_error(interaction, error):

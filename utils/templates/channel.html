@@ -1,13 +1,14 @@
 {% extends 'base.html' %}
 
 {% block title %}{{ channel_name }} (channels) - {{ super() }}{% endblock %}
-{% block stylesheet_level %}../../{{ super() }}{% endblock %}
+{% block stylesheet_level %}../../../{{ super() }}{% endblock %}
+{% block codehilite_stylesheet %}../{{ super() }}{% endblock %}
 
 {% block navigation %}
     <div id="navigation">
         <div id="navtitle">
-            <div id="backbtn"><a href="../index.html">&lt;</a></div>
-            <span id="ctf">channels / {{ archive_name }}</span>
+            <div id="backbtn"><a href="../../index.html">&lt;</a></div>
+            <span id="ctf">channels / {{ category }} / {{ archive_name }}</span>
         </div>
         <ul>
             <li><a href="./{{ archive_name }}.html"># {{ channel_name }}</a></li>
