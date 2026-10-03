@@ -132,6 +132,14 @@ class StoreTest(unittest.TestCase):
 
         self.assertEqual(ctfs.get(created.id).released_at, utc(2026, 10, 13, 8))
 
+    def test_lock_time_is_stored_once(self):
+        created = ctfs.create(new_ctf())
+
+        self.assertTrue(ctfs.mark_locked(created.id, utc(2026, 10, 17, 8)))
+        self.assertFalse(ctfs.mark_locked(created.id, utc(2026, 10, 18, 8)))
+
+        self.assertEqual(ctfs.get(created.id).locked_at, utc(2026, 10, 17, 8))
+
     def test_archive_time_is_stored(self):
         created = ctfs.create(new_ctf())
         ctfs.mark_archived(created.id, utc(2026, 10, 20, 9))

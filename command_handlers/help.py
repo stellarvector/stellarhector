@@ -26,6 +26,7 @@ For admins and managers:
 `/setup-ctf` - Set up a new CTF: its role, category, main channel and #bot channel. Give the CTFtime event ID to also store its dates.
 In the #bot channel of a CTF:
 `/release-ctf` - Open the CTF to all members.
+`/lock-ctf` - Make the CTF read-only (staff can still write) and archive it. Releases it first when needed.
 `/archive-ctf` - Archive the CTF's channels.
 `/remove-ctf` - Delete the CTF's channels, category and role. Refused when it was never archived, unless `force` is set.
 

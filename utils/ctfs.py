@@ -101,6 +101,15 @@ def mark_released(ctf_id, at):
         return cursor.rowcount == 1
 
 
+def mark_locked(ctf_id, at):
+    """Remember that the CTF was locked at the time at, unless it was already. Returns whether that changed it, so of
+    two runs at the same time only one does."""
+    with db.transaction() as conn:
+        cursor = conn.execute("UPDATE ctfs SET locked_at = ? WHERE id = ? AND locked_at IS NULL",
+                              (db.time_text(at), ctf_id))
+        return cursor.rowcount == 1
+
+
 def set_overview_message(ctf_id, message_id):
     """Remember the CTF's challenge overview message in its main channel."""
     with db.transaction() as conn:
