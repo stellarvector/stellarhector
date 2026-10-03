@@ -102,14 +102,16 @@ class StoreTest(unittest.TestCase):
         found = ctfs.get(created.id)
         self.assertEqual((found.join_channel_id, found.join_message_id), (6, 7))
 
-    def test_deleted_ctf_is_gone_with_its_players_and_its_name_can_be_used_again(self):
+    def test_deleted_ctf_is_gone_with_its_players_and_categories_and_its_name_can_be_used_again(self):
         created = ctfs.create(new_ctf())
         ctfs.add_player(created.id, 42, utc(2026, 10, 3, 12))
+        ctfs.add_category(created.id, "web", 8)
 
         ctfs.delete(created.id)
 
         self.assertIsNone(ctfs.get(created.id))
         self.assertEqual(ctfs.players(created.id), [])
+        self.assertEqual(ctfs.categories(created.id), [])
         ctfs.create(new_ctf())
 
     def test_archive_time_is_stored(self):
@@ -199,6 +201,34 @@ class PlayersTest(unittest.TestCase):
 
         self.assertEqual(ctfs.times_joined(42), 2)
         self.assertEqual(ctfs.times_joined(99), 0)
+
+
+class CategoriesTest(unittest.TestCase):
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        db.init(Path(tmp.name) / "test.db")
+        self.addCleanup(db.close)
+        self.ctf = ctfs.create(new_ctf())
+
+    def test_categories_are_listed_by_slug(self):
+        ctfs.add_category(self.ctf.id, "web", 8)
+        ctfs.add_category(self.ctf.id, "crypto", 9)
+
+        self.assertEqual(ctfs.categories(self.ctf.id), [ctfs.Category("crypto", 9), ctfs.Category("web", 8)])
+
+    def test_categories_are_per_ctf(self):
+        other = ctfs.create(new_ctf(name="Bar CTF"))
+        ctfs.add_category(self.ctf.id, "web", 8)
+        ctfs.add_category(other.id, "web", 9)
+
+        self.assertEqual(ctfs.categories(other.id), [ctfs.Category("web", 9)])
+
+    def test_storing_a_category_again_gives_it_the_new_channel(self):
+        ctfs.add_category(self.ctf.id, "web", 8)
+        ctfs.add_category(self.ctf.id, "web", 9)
+
+        self.assertEqual(ctfs.categories(self.ctf.id), [ctfs.Category("web", 9)])
 
 
 if __name__ == "__main__":

@@ -15,6 +15,7 @@ LOAD_EVENTS = [
 LOAD_COMMANDS = [
     "help",
     "setup_ctf",
+    "add_category",
     "create_challenge",
     "add_player",
     "remove_ctf",

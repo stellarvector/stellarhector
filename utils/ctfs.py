@@ -91,9 +91,11 @@ def mark_last_call(ctf_id, channel_id, message_id, at):
 
 
 def delete(ctf_id):
-    """Forget the CTF and its player list entirely, as if it was never set up (unlike mark_removed)."""
+    """Forget the CTF, its player list and its categories entirely, as if it was never set up (unlike
+    mark_removed)."""
     with db.transaction() as conn:
         conn.execute("DELETE FROM ctf_players WHERE ctf_id = ?", (ctf_id,))
+        conn.execute("DELETE FROM ctf_categories WHERE ctf_id = ?", (ctf_id,))
         conn.execute("DELETE FROM ctfs WHERE id = ?", (ctf_id,))
 
 
@@ -178,6 +180,29 @@ def times_joined(user_id):
     with db.transaction() as conn:
         return conn.execute("SELECT COUNT(*) FROM ctf_players WHERE user_id = ? AND status = 'joined'",
                             (user_id,)).fetchone()[0]
+
+
+@dataclass(frozen=True)
+class Category:
+    """A challenge category of a CTF: its slug, also the name of its channel, and that channel's ID."""
+    slug: str
+    channel_id: int
+
+
+def add_category(ctf_id, slug, channel_id):
+    """Store the CTF's category with this slug and channel; a category it has already gets this channel instead."""
+    with db.transaction() as conn:
+        conn.execute("INSERT INTO ctf_categories (ctf_id, slug, channel_id) VALUES (?, ?, ?)"
+                     " ON CONFLICT (ctf_id, slug) DO UPDATE SET channel_id = excluded.channel_id",
+                     (ctf_id, slug, channel_id))
+
+
+def categories(ctf_id):
+    """The CTF's categories, by slug."""
+    with db.transaction() as conn:
+        rows = conn.execute("SELECT slug, channel_id FROM ctf_categories WHERE ctf_id = ? ORDER BY slug",
+                            (ctf_id,)).fetchall()
+    return [Category(row["slug"], row["channel_id"]) for row in rows]
 
 
 def _player(row):
