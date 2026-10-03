@@ -1,6 +1,7 @@
 import asyncio
 import tempfile
 import unittest
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from core import db
@@ -185,6 +186,112 @@ class ReplyTest(unittest.TestCase):
     def test_skipped_reply_shows_the_error(self):
         self.assertEqual(blog_feed.skipped_reply(blog_feed.FeedError("Blog feed is not valid XML")),
                          ":warning: The blog feed could not be read, so nothing changed: `Blog feed is not valid XML`")
+
+
+START = datetime(2026, 10, 3, 12, 0, tzinfo=timezone.utc)
+
+
+class CheckHealthTest(unittest.TestCase):
+    def fail_every_ten_minutes(self, health, start, until):
+        """Whether each failure every 10 minutes from start up to and including until asks for the alert."""
+        due = []
+        now = start
+        while now <= until:
+            due.append(health.failed(now))
+            now += timedelta(minutes=10)
+        return due
+
+    def test_alert_is_due_once_failing_for_24_hours(self):
+        health = blog_feed.CheckHealth()
+
+        due = self.fail_every_ten_minutes(health, START, START + timedelta(hours=24))
+
+        self.assertEqual(due, [False] * 144 + [True])
+
+    def test_failing_since_is_the_first_failure_in_a_row(self):
+        health = blog_feed.CheckHealth()
+        self.fail_every_ten_minutes(health, START, START + timedelta(hours=1))
+
+        self.assertEqual(health.failing_since, START)
+
+    def test_alert_is_not_due_again_once_posted(self):
+        health = blog_feed.CheckHealth()
+        health.failed(START)
+        health.failed(START + timedelta(hours=24))
+        health.alert_posted()
+
+        self.assertFalse(health.failed(START + timedelta(hours=48)))
+
+    def test_alert_that_could_not_be_posted_is_due_on_the_next_failure(self):
+        health = blog_feed.CheckHealth()
+        health.failed(START)
+        health.failed(START + timedelta(hours=24))
+
+        self.assertTrue(health.failed(START + timedelta(hours=24, minutes=10)))
+
+    def test_success_starts_a_new_failure_period(self):
+        health = blog_feed.CheckHealth()
+        health.failed(START)
+        health.succeeded()
+
+        self.assertFalse(health.failed(START + timedelta(hours=24)))
+        self.assertTrue(health.failed(START + timedelta(hours=48)))
+
+    def test_recovery_is_due_on_the_first_success_after_an_alert(self):
+        health = blog_feed.CheckHealth()
+        health.failed(START)
+        health.failed(START + timedelta(hours=24))
+        health.alert_posted()
+
+        self.assertTrue(health.succeeded())
+        health.recovery_posted()
+        self.assertFalse(health.succeeded())
+
+    def test_recovery_that_could_not_be_posted_is_due_on_the_next_success(self):
+        health = blog_feed.CheckHealth()
+        health.failed(START)
+        health.failed(START + timedelta(hours=24))
+        health.alert_posted()
+        health.succeeded()
+
+        self.assertTrue(health.succeeded())
+
+    def test_no_recovery_without_an_alert(self):
+        health = blog_feed.CheckHealth()
+        health.failed(START)
+
+        self.assertFalse(health.succeeded())
+
+    def test_new_failures_after_recovery_alert_again(self):
+        health = blog_feed.CheckHealth()
+        health.failed(START)
+        health.failed(START + timedelta(hours=24))
+        health.alert_posted()
+        health.succeeded()
+        health.recovery_posted()
+
+        self.assertFalse(health.failed(START + timedelta(hours=25)))
+        self.assertTrue(health.failed(START + timedelta(hours=49)))
+
+
+class FailureTest(unittest.TestCase):
+    def test_check_that_created_none_of_its_new_posts_failed(self):
+        self.assertEqual(blog_feed.failure_reason(blog_feed.CheckResult(failed=2)),
+                         "None of the 2 new blog posts could be created as a forum post")
+
+    def test_check_that_created_some_of_its_new_posts_worked(self):
+        self.assertIsNone(blog_feed.failure_reason(blog_feed.CheckResult(created=1, failed=2)))
+
+    def test_check_without_new_posts_worked(self):
+        self.assertIsNone(blog_feed.failure_reason(blog_feed.CheckResult()))
+        self.assertIsNone(blog_feed.failure_reason(blog_feed.CheckResult(recorded=13)))
+
+
+class AlertTest(unittest.TestCase):
+    def test_alert_says_since_when_and_the_last_error(self):
+        self.assertEqual(blog_feed.alert_message(START, "Blog feed is not valid XML"),
+                         ":warning: The blog check has been failing since <t:1791028800:f>, so new blog posts are not"
+                         " shared in #learning. It keeps trying every 10 minutes. Last error: `Blog feed is not valid XML`")
 
 
 def use_temporary_database(test):

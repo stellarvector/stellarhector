@@ -1,14 +1,14 @@
 """Shares the new posts of Stellar Vector's blog as forum posts in #learning.
 
 parse_feed and the forum post builders are pure. check downloads the feed and creates a forum post for every item it
-has not seen before.
+has not seen before. CheckHealth tells when the checks have been failing long enough to alert the admins.
 """
 import asyncio
 import html
 import logging
 import xml.etree.ElementTree as ElementTree
 from dataclasses import dataclass, replace
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from urllib.parse import urlparse
 
 import aiohttp
@@ -32,6 +32,10 @@ NO_TITLE = "Untitled post"
 
 # How much of the reason a skipped /blog-check reply shows
 REASON_LIMIT = 500
+
+# How often the blog is checked by itself, and how long the checks may keep failing before the admins are alerted
+CHECK_MINUTES = 10
+ALERT_AFTER = timedelta(hours=24)
 
 # The post-and-record work of checks that were stopped while it ran
 _unfinished = set()
@@ -106,6 +110,53 @@ async def check(create_post, fetch=download):
         else:
             result = replace(result, failed=result.failed + 1)
     return result
+
+
+class CheckHealth:
+    """Remembers since when the checks have been failing in a row, to tell the admins once it has been a while.
+
+    Kept in memory only, so a restart starts a new failure period.
+    """
+
+    def __init__(self, alert_after=ALERT_AFTER):
+        self.alert_after = alert_after
+        self.failing_since = None
+        self.alerted = False
+
+    def failed(self, now):
+        """Count a failed check at now. Returns whether the alert is due now: it stays due until alert_posted."""
+        if self.failing_since is None:
+            self.failing_since = now
+        return now - self.failing_since >= self.alert_after and not self.alerted
+
+    def alert_posted(self):
+        self.alerted = True
+
+    def succeeded(self):
+        """End the failure period after a check that worked. Returns whether the recovery is due: the admins were
+        alerted and not told yet that it works again (recovery_posted)."""
+        self.failing_since = None
+        return self.alerted
+
+    def recovery_posted(self):
+        """Stop the recovery being due; until then every check that works asks for it again."""
+        self.alerted = False
+
+
+def failure_reason(result):
+    """Why the check with result failed, or None when it worked. A check fails when it had new items and could not
+    create a forum post for any of them; a feed that can't be read is a FeedError instead."""
+    if result.failed and not result.created:
+        return f"None of the {_count(result.failed, 'new blog post')} could be created as a forum post"
+    return None
+
+
+def alert_message(failing_since, error):
+    """The alert for the admins when the checks have been failing since failing_since, the last one because of
+    error."""
+    return (f":warning: The blog check has been failing since <t:{int(failing_since.timestamp())}:f>, so new blog posts"
+            f" are not shared in #learning. It keeps trying every {CHECK_MINUTES} minutes."
+            f" Last error: {inline_code(str(error), REASON_LIMIT)}")
 
 
 def reply(result):

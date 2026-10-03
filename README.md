@@ -143,7 +143,7 @@ Admins (`ADMIN_ROLE`) can run it in any channel to run the daily check right awa
 
 ## Blog feed
 
-On every check, new posts on [Stellar Vector's blog](https://blog.stellarvector.be/) are shared as forum posts in `LEARNING_FORUM_ID` (#learning). Without `LEARNING_FORUM_ID` the feature is off.
+Every 10 minutes the bot checks [Stellar Vector's blog](https://blog.stellarvector.be/) and shares its new posts as forum posts in `LEARNING_FORUM_ID` (#learning). Without `LEARNING_FORUM_ID` the feature is off.
 
 The check downloads the blog's RSS feed (`https://blog.stellarvector.be/index.xml`) and creates a forum post for every item whose `guid` is not in the `blog_posts_seen` table yet, oldest first. The very first check (empty table) only records the items that are already there and posts nothing, so the blog's history is not posted.
 
@@ -152,8 +152,8 @@ The check downloads the blog's RSS feed (`https://blog.stellarvector.be/index.xm
 - Titles are cut to Discord's 100 characters. The post says what it is, followed by the item's description (when it has one) and the link.
 - Tags are looked up on the forum by name, ignoring case. A tag the forum doesn't have is left out with a logged warning; the bot never creates tags.
 
-A feed that can't be downloaded or parsed changes nothing and is logged. A forum post that can't be created is logged, and its item is tried again on the next check. The check itself is `check()` in `utils/blog_feed.py`.
+A feed that can't be downloaded or parsed changes nothing and is logged. A forum post that can't be created is logged, and its item is tried again on the next check. A check fails when the feed can't be read, or when it had new items and none of their forum posts could be created; failures are only logged, as the next check is 10 minutes later anyway. A check that takes longer than 3 minutes is stopped and fails too; the next check carries on where it left off. Once the checks have been failing for 24 hours in a row, one alert is posted in `ADMIN_CHANNEL_ID`, and one message when it works again; a message that can't be posted is tried again on the next check. This is kept in memory, so a restart starts counting again. A failing `/blog-check` counts toward the alert like a failing scheduled check. Other errors that reach the scheduler are alerted through the job's `alert_after` of 24 hours. The scheduled check and `/blog-check` take turns, so they never post the same item twice. The check itself is `check()` in `utils/blog_feed.py`.
 
 ### `/blog-check`
 
-Admins (`ADMIN_ROLE`) can run it in any channel to run the check right away. It replies, only to the admin, with how many forum posts were created.
+Admins (`ADMIN_ROLE`) can run it in any channel to run the check right away (waiting for a check that is running). It replies, only to the admin, with how many forum posts were created.
