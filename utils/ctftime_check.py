@@ -1,4 +1,5 @@
-"""The daily check of the CTFs that calendar sessions link to on CTFtime, telling the admins when their dates change.
+"""The daily check on CTFtime of the CTFs that calendar sessions link to, and of those set up and not locked, telling
+the admins when their dates change.
 
 decide is pure: it turns what was stored for a CTFtime event and what CTFtime answers now into the alert to post and
 what to store. check runs it for every CTF to check, asking CTFtime and posting the alerts.
@@ -64,7 +65,7 @@ class CheckResult:
 def decide(ctftime_id, stored, event, sessions):
     """The Outcome of checking the CTFtime event ctftime_id. stored is its Record, None the first time; event is the
     ctftime.Event CTFtime answers now, None when it does not know the event; sessions are the calendar's Sessions
-    linking to it."""
+    linking to it, none for a CTF that is set up without any."""
     if event is None:
         return _gone(ctftime_id, stored, sessions)
 
@@ -82,12 +83,18 @@ def decide(ctftime_id, stored, event, sessions):
     if (stored.told_start, stored.told_finish) == (event.start, event.finish):
         return Outcome(None, record)
 
-    if all_overlap:
+    if not sessions:
+        # A CTF that is set up is checked also when no calendar session links to it (anymore)
+        heading = f":information_source: CTFtime changed the dates of {ctf}; it has no calendar sessions."
+    elif all_overlap:
         heading = f":information_source: CTFtime changed the dates of {ctf}; every calendar session still falls within it."
     else:
         heading = f":warning: CTFtime changed the dates of {ctf}, and not every calendar session falls within it anymore."
-    return Outcome(f"{heading}\nWas: {_period(stored.told_start, stored.told_finish)}\n"
-                   f"Now: {_period(event.start, event.finish)}\n{_sessions(sessions, event)}", record)
+    message = (f"{heading}\nWas: {_period(stored.told_start, stored.told_finish)}\n"
+               f"Now: {_period(event.start, event.finish)}")
+    if sessions:
+        message += f"\n{_sessions(sessions, event)}"
+    return Outcome(message, record)
 
 
 def reply(result):
@@ -111,8 +118,10 @@ def _gone(ctftime_id, stored, sessions):
     if stored is None:
         stored = Record(ctftime_id, title=None, start=None, finish=None, told_start=None, told_finish=None)
     ctf = f"CTFtime event {ctftime_id}" if stored.title is None else _ctf(ctftime_id, stored.title)
-    return Outcome(f":warning: {ctf} is gone from CTFtime (<https://ctftime.org/event/{ctftime_id}/> is not found)."
-                   f" Check the calendar sessions linking to it:\n{_sessions(sessions)}", replace(stored, gone=True))
+    message = f":warning: {ctf} is gone from CTFtime (<https://ctftime.org/event/{ctftime_id}/> is not found)."
+    if sessions:
+        message += f" Check the calendar sessions linking to it:\n{_sessions(sessions)}"
+    return Outcome(message, replace(stored, gone=True))
 
 
 def _ctf(ctftime_id, title):
@@ -145,8 +154,9 @@ def _escaped(title):
 
 
 async def check(now, alert, get_event=ctftime.get_event):
-    """Check every CTFtime event linked from a calendar session that is not over at now, and post an alert through
-    alert(ctftime_id, message) when the admins should know. Returns a CheckResult.
+    """Check every CTFtime event linked from a calendar session that is not over at now, and that of every CTF that is
+    set up and not locked, and post an alert through alert(ctftime_id, message) when the admins should know. Returns a
+    CheckResult.
 
     An event CTFtime can't be asked about is logged and skipped until the next check. An alert that can't be posted
     is logged; CTFtime's data is stored, but the alert is due again on the next check.

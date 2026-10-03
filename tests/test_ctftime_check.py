@@ -94,6 +94,15 @@ class ChangeTest(unittest.TestCase):
         self.assertIn("Second night", outcome.alert)
         self.assertIn("outside the CTF", outcome.alert)
 
+    def test_change_of_a_ctf_without_sessions_is_a_notice_without_session_lines(self):
+        # A CTF that is set up is checked also when no calendar session links to it
+        outcome = decide(record(), event(start=NEW_START, finish=NEW_FINISH), [])
+
+        self.assertTrue(outcome.alert.startswith(":information_source:"))
+        self.assertIn("no calendar sessions", outcome.alert)
+        self.assertNotIn("every calendar session", outcome.alert)
+        self.assertTrue(outcome.alert.endswith(f"<t:{int(NEW_FINISH.timestamp())}:F>"))
+
     def test_only_the_finish_changing_is_alerted(self):
         outcome = decide(record(), event(finish=NEW_FINISH))
 
@@ -128,6 +137,13 @@ class GoneTest(unittest.TestCase):
         self.assertIn("Foo CTF", outcome.alert)
         self.assertIn("CTF night", outcome.alert)
         self.assertEqual(outcome.record, record(gone=True))
+
+    def test_event_of_a_ctf_without_sessions_gone_from_ctftime_does_not_point_to_sessions(self):
+        outcome = decide(record(), None, [])
+
+        self.assertTrue(outcome.alert.startswith(":warning:"))
+        self.assertNotIn("calendar session", outcome.alert)
+        self.assertTrue(outcome.alert.endswith("is not found)."))
 
     def test_event_already_alerted_as_gone_posts_nothing(self):
         outcome = decide(record(gone=True), None)
