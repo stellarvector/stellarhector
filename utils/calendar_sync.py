@@ -20,6 +20,7 @@ import x_wr_timezone
 import core.db as db
 from utils.ctftime import parse_ctftime_id
 from utils.text import cut, inline_code
+from utils.unfinished import UnfinishedWork
 
 # Discord refuses events that a bot creates with a start in the past, so running events start this much from now
 START_DELAY = timedelta(minutes=1)
@@ -63,7 +64,7 @@ StoredOccurrence = namedtuple("StoredOccurrence", ["discord_event_id", "announce
 WHERE_KEY = "uid = ? AND start = ?"
 
 # The create and edit work of syncs that were stopped while it ran
-_unfinished = set()
+_unfinished = UnfinishedWork()
 
 
 class OccurrenceKey(NamedTuple):
@@ -508,8 +509,7 @@ async def sync(guild, ics_url, tz, lookahead, announce_channel=None, ping_role=N
     when the server's events can't be read. An event that Discord refuses is logged and tried again on the next sync.
     """
     # A sync that was stopped may still be creating or editing; wait for it, so its event is not created again
-    if _unfinished:
-        await asyncio.wait(_unfinished)
+    await _unfinished.wait()
 
     now = datetime.now(timezone.utc)
     stored = _stored_occurrences()
@@ -650,7 +650,7 @@ async def _create(guild, action, replaced=None):
         return event
 
     # Shielded: when the job times out mid-create, the event is still remembered once Discord made it
-    return await _finish_even_if_stopped(create_and_remember())
+    return await _unfinished.finish_even_if_stopped(create_and_remember())
 
 
 async def _update(event, action):
@@ -674,15 +674,7 @@ async def _update(event, action):
         return edited
 
     # Shielded like create_and_remember, so the end stays the one Discord has
-    return await _finish_even_if_stopped(edit_and_remember())
-
-
-async def _finish_even_if_stopped(work):
-    """Await the coroutine work, which goes on when the sync is stopped meanwhile; the next sync waits for it."""
-    task = asyncio.ensure_future(work)
-    _unfinished.add(task)
-    task.add_done_callback(_unfinished.discard)
-    return await asyncio.shield(task)
+    return await _unfinished.finish_even_if_stopped(edit_and_remember())
 
 
 async def _cancel(event, channel, message_id, key):

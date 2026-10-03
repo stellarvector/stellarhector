@@ -15,7 +15,9 @@ import aiohttp
 import discord
 
 import core.db as db
+import core.scheduler as scheduler
 from utils.text import cut, inline_code
+from utils.unfinished import UnfinishedWork
 
 FEED_URL = "https://blog.stellarvector.be/index.xml"
 DOWNLOAD_TIMEOUT = aiohttp.ClientTimeout(total=30)
@@ -38,7 +40,7 @@ CHECK_MINUTES = 10
 ALERT_AFTER = timedelta(hours=24)
 
 # The post-and-record work of checks that were stopped while it ran
-_unfinished = set()
+_unfinished = UnfinishedWork()
 
 
 class FeedError(Exception):
@@ -85,8 +87,7 @@ async def check(create_post, fetch=download):
     be created is logged, and its item is tried again on the next check.
     """
     # A check that was stopped may still be posting and recording; wait for it, so it is not posted again
-    if _unfinished:
-        await asyncio.wait(_unfinished)
+    await _unfinished.wait()
 
     posts = parse_feed(await fetch())
     seen = _seen()
@@ -102,10 +103,7 @@ async def check(create_post, fetch=download):
         seen.add(post.guid)
 
         # Shielded: when the check is stopped mid-post, a created post is still recorded so it is not posted twice
-        posting = asyncio.ensure_future(_post_and_record(post, create_post))
-        _unfinished.add(posting)
-        posting.add_done_callback(_unfinished.discard)
-        if await asyncio.shield(posting):
+        if await _unfinished.finish_even_if_stopped(_post_and_record(post, create_post)):
             result = replace(result, created=result.created + 1)
         else:
             result = replace(result, failed=result.failed + 1)
@@ -156,7 +154,7 @@ def alert_message(failing_since, error):
     error."""
     return (f":warning: The blog check has been failing since <t:{int(failing_since.timestamp())}:f>, so new blog posts"
             f" are not shared in #learning. It keeps trying every {CHECK_MINUTES} minutes."
-            f" Last error: {inline_code(str(error), REASON_LIMIT)}")
+            f" Last error: {inline_code(str(error), scheduler.ALERT_ERROR_LENGTH)}")
 
 
 def reply(result):

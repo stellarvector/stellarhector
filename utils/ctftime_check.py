@@ -3,7 +3,6 @@
 decide is pure: it turns what was stored for a CTFtime event and what CTFtime answers now into the alert to post and
 what to store. check runs it for every CTF to check, asking CTFtime and posting the alerts.
 """
-import asyncio
 import logging
 from collections import defaultdict
 from dataclasses import dataclass, replace
@@ -14,13 +13,14 @@ import discord
 import core.db as db
 from utils import ctftime
 from utils.text import cut
+from utils.unfinished import UnfinishedWork
 
 # How many sessions an alert lists, and how much of a title it shows, to stay well under Discord's 2000 characters
 SESSION_LIMIT = 5
 TITLE_LIMIT = 100
 
 # The post-and-store work of checks that were stopped while it ran
-_unfinished = set()
+_unfinished = UnfinishedWork()
 
 
 @dataclass(frozen=True)
@@ -152,8 +152,7 @@ async def check(now, alert, get_event=ctftime.get_event):
     is logged; CTFtime's data is stored, but the alert is due again on the next check.
     """
     # A check that was stopped may still be posting and storing; wait for it, so it is not posted again
-    if _unfinished:
-        await asyncio.wait(_unfinished)
+    await _unfinished.wait()
 
     result = CheckResult()
     for ctftime_id, sessions in _sessions_to_check(now).items():
@@ -167,10 +166,7 @@ async def check(now, alert, get_event=ctftime.get_event):
         stored = _stored(ctftime_id)
         outcome = decide(ctftime_id, stored, event, sessions)
         # Shielded: when the check is stopped mid-alert, a posted alert is still remembered so it is not posted twice
-        telling = asyncio.ensure_future(_tell_and_store(stored, outcome, now, alert))
-        _unfinished.add(telling)
-        telling.add_done_callback(_unfinished.discard)
-        posted = await asyncio.shield(telling)
+        posted = await _unfinished.finish_even_if_stopped(_tell_and_store(stored, outcome, now, alert))
         result = replace(result, checked=result.checked + 1, alerts=result.alerts + posted)
     return result
 

@@ -16,8 +16,10 @@ from error_handlers.default import default as default_error_handler
 from error_handlers.permissions import check_role_error
 from utils import blog_feed
 
-# Shorter than the job's timeout, so a check that hangs is counted as a failed check instead of stopped by the scheduler
+# Shorter than TIMEOUT, so a check that hangs is counted as a failed check instead of stopped by the scheduler
 CHECK_TIMEOUT = timedelta(minutes=3)
+# Room to wait for a running check (CHECK_TIMEOUT and its alert) and then run one, for the job and /blog-check alike
+TIMEOUT = 2 * (CHECK_TIMEOUT + scheduler.ALERT_TIMEOUT) + timedelta(minutes=1)
 
 _health = blog_feed.CheckHealth()
 # The scheduled check and /blog-check take turns, so they never post the same blog post twice
@@ -96,7 +98,7 @@ def _forum_poster(forum_id):
 if bot.channel_id("LEARNING_FORUM_ID") is not None:
     # A failing check is alerted through _health; alert_after covers the failures that reach the scheduler
     scheduler.register(scheduler.Job("blog-check", scheduler.every_minutes(blog_feed.CHECK_MINUTES), run_blog_check,
-                                     alert_after=blog_feed.ALERT_AFTER))
+                                     timeout=TIMEOUT, alert_after=blog_feed.ALERT_AFTER))
 
 
 @bot.client.tree.command(name="blog-check", description="Share the new posts on Stellar Vector's blog in #learning right away", guild=bot.guild)
@@ -111,7 +113,7 @@ async def blog_check_command(interaction: discord.Interaction):
 
     try:
         # Like the job, so a hanging check can't hold the lock and keep the scheduled checks waiting
-        result = await asyncio.wait_for(check_blog(), timeout=scheduler.DEFAULT_TIMEOUT.total_seconds())
+        result = await asyncio.wait_for(check_blog(), timeout=TIMEOUT.total_seconds())
     except blog_feed.FeedError as e:
         await interaction.edit_original_response(content=blog_feed.skipped_reply(e))
         return
