@@ -15,22 +15,31 @@ def ts(moment):
 
 
 def players(joined, pending):
-    return ([ctfs.Player(user_id, "joined", None, JOINED_AT) for user_id in range(joined)]
-            + [ctfs.Player(100 + user_id, "pending", 7, JOINED_AT) for user_id in range(pending)])
+    return ([ctfs.Player(user_id, ctfs.PlayerStatus.JOINED, None, JOINED_AT) for user_id in range(joined)]
+            + [ctfs.Player(100 + user_id, ctfs.PlayerStatus.PENDING, 7, JOINED_AT) for user_id in range(pending)])
 
 
 class StageTest(unittest.TestCase):
     def test_a_ctf_is_set_up_until_it_is_released(self):
-        self.assertEqual(ctf_status.stage(ctf(last_call_at=LAST_CALL)), "set up")
+        self.assertEqual(ctf(last_call_at=LAST_CALL).stage, ctfs.Stage.SET_UP)
 
     def test_released(self):
-        self.assertEqual(ctf_status.stage(ctf(released_at=RELEASE)), "released")
+        self.assertEqual(ctf(released_at=RELEASE).stage, ctfs.Stage.RELEASED)
 
     def test_locked_while_its_archive_failed(self):
-        self.assertEqual(ctf_status.stage(ctf(released_at=RELEASE, locked_at=LOCK)), "locked")
+        self.assertEqual(ctf(released_at=RELEASE, locked_at=LOCK).stage, ctfs.Stage.LOCKED)
 
     def test_archived(self):
-        self.assertEqual(ctf_status.stage(ctf(released_at=RELEASE, locked_at=LOCK, archived_at=LOCK)), "archived")
+        self.assertEqual(ctf(released_at=RELEASE, locked_at=LOCK, archived_at=LOCK).stage, ctfs.Stage.ARCHIVED)
+
+
+    def test_archived_by_command_before_the_lock(self):
+        self.assertEqual(ctf(released_at=RELEASE, archived_at=LOCK).stage, ctfs.Stage.ARCHIVED)
+
+    def test_joining_closes_once_released(self):
+        self.assertFalse(ctf(last_call_at=LAST_CALL).joining_closed)
+        self.assertTrue(ctf(released_at=RELEASE).joining_closed)
+        self.assertTrue(ctf(archived_at=LOCK).joining_closed)
 
 
 class LineTest(unittest.TestCase):

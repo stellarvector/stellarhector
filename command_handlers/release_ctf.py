@@ -22,8 +22,7 @@ async def release_ctf(interaction: discord.Interaction):
     await interaction.response.defer(thinking=True)
 
     try:
-        await ctf_release.release(interaction.guild, location.ctf, bot.config.get("MEMBER_ROLE"),
-                                  datetime.now(timezone.utc))
+        await ctf_release.release(interaction.guild, location.ctf, bot.MEMBER_ROLE, datetime.now(timezone.utc))
     except ctf_release.ReleaseRefused as e:
         await interaction.edit_original_response(content=f":no_entry: {e}")
         return

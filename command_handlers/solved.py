@@ -15,6 +15,10 @@ async def solved(interaction, flag: str):
         await interaction.response.send_message(f":no_entry: {ctf_challenges.NOT_IN_CHALLENGE}", ephemeral=True)
         return
 
+    if location.ctf.locked_at is not None:
+        await interaction.response.send_message(f":no_entry: {ctf_places.LOCKED}", ephemeral=True)
+        return
+
     if interaction.user.get_role(location.ctf.role_id) is None:
         await interaction.response.send_message(
             ":no_entry: You are not playing this CTF so you can't mark a challenge solved.\n"

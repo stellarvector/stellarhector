@@ -4,7 +4,7 @@ from dataclasses import dataclass
 
 import discord
 
-from utils import ctf_overview, ctfs
+from utils import ctf_overview, ctfs, discord_objects
 from utils.ctf_places import Place
 
 # Two runs at the same time could both find a challenge missing and make two threads for it
@@ -49,7 +49,7 @@ async def start(guild, ctf, category, channel, user, slug):
     archived thread is unarchived first. Returns what was Started."""
     async with _lock:
         stored = ctfs.challenge(ctf.id, category.slug, slug)
-        thread = None if stored is None else await _thread(guild, stored.thread_id)
+        thread = None if stored is None else await discord_objects.thread(guild, stored.thread_id)
         created = thread is None
         if created:
             thread = await _create_thread(channel, user, slug, solved=stored is not None and stored.solved)
@@ -93,17 +93,6 @@ async def _create_thread(channel, user, slug, solved):
     except discord.DiscordException:
         await message.delete()
         raise
-
-
-async def _thread(guild, thread_id):
-    """The thread with this ID, also when it is archived (and so not in the cache), or None when it was deleted."""
-    thread = guild.get_channel_or_thread(thread_id)
-    if thread is not None:
-        return thread
-    try:
-        return await guild.fetch_channel(thread_id)
-    except discord.NotFound:
-        return None
 
 
 def reply(started):

@@ -24,7 +24,12 @@ async def archive_ctf(interaction: discord.Interaction):
     ctf = location.ctf
     await ctf_archive.archive(interaction.guild, ctf, datetime.now(timezone.utc))
 
-    await interaction.edit_original_response(content=f"{interaction.user.mention} archived {ctf.name}")
+    message = f"{interaction.user.mention} archived {ctf.name}"
+    try:
+        await interaction.edit_original_response(content=message)
+    except discord.HTTPException:
+        # A long archive outlasts the interaction (15 minutes); the message still goes to #bot
+        await interaction.channel.send(message)
 
 @archive_ctf.error
 async def archive_ctf_error(interaction, error):

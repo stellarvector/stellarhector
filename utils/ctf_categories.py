@@ -32,11 +32,6 @@ def split_names(text):
     return [name.strip() for name in text.split(",") if name.strip()]
 
 
-def may_add(member, ctf, staff_roles):
-    """Whether the member may add categories to the CTF: its players (with the CTF role) and staff may."""
-    return any(role.id == ctf.role_id or role.name in staff_roles for role in member.roles)
-
-
 async def add_categories(guild, ctf, text):
     """Create a channel for each category named in the comma-separated text that the CTF does not have yet, and store
     it. A stored category whose channel was deleted by hand is created again. The channels go in the CTF's category,

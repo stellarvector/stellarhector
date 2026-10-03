@@ -16,7 +16,11 @@ async def add_category(interaction: discord.Interaction, names: str):
     if location is None:
         return
 
-    if not ctf_categories.may_add(interaction.user, location.ctf, bot.STAFF_ROLES):
+    if location.ctf.locked_at is not None:
+        await interaction.response.send_message(f":no_entry: {ctf_places.LOCKED}", ephemeral=True)
+        return
+
+    if not ctf_places.may_play(interaction.user, location.ctf, bot.STAFF_ROLES):
         await interaction.response.send_message(
             ":no_entry: You are not playing this CTF so you can't add a category.\n"
             "If you are playing please ask a moderator.", ephemeral=True)

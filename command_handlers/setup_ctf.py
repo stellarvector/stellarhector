@@ -3,22 +3,12 @@
 # Can be run from any channel
 #   by an administrator or manager
 import core.bot as bot
-import core.config as config_helpers
+import core.ctf_settings as ctf_settings
 import discord
 from discord import app_commands
 from error_handlers.permissions import check_role_error
 from error_handlers.default import default as default_error_handler
 from utils import ctf_setup
-
-
-def settings():
-    def role(key):
-        return config_helpers.role_name(bot.config, key)
-
-    return ctf_setup.Settings(admin_role=role("ADMIN_ROLE"), manager_role=role("MANAGER_ROLE"),
-                              moderator_role=role("MODERATOR_ROLE"), member_role=role("MEMBER_ROLE"),
-                              role_color=int(bot.config.get("CTF_ROLE_COLOR_HEX"), 16),
-                              upcoming_channel_id=bot.channel_id("UPCOMING_CTFS_CHANNEL_ID"))
 
 
 @bot.client.tree.command(name="setup-ctf", description="Set up a new CTF", guild=bot.guild)
@@ -29,7 +19,7 @@ async def setup_ctf_command(interaction: discord.Interaction, name: str, ctftime
     await interaction.response.defer(thinking=True)
 
     try:
-        ctf = await ctf_setup.setup_ctf(interaction.guild, name, ctftime_id, settings())
+        ctf = await ctf_setup.setup_ctf(interaction.guild, name, ctftime_id, ctf_settings.setup_settings())
     except ctf_setup.SetupRefused as e:
         await interaction.edit_original_response(content=f":no_entry: {e}")
         return

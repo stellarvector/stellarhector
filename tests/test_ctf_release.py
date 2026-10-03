@@ -132,7 +132,7 @@ class ReleaseTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(card.content, f"{content}\n:lock: No longer needed: CTF released")
         self.assertIsNone(card.view)
         self.assertIsNone(ctfs.player(self.ctf.id, waiting.id))
-        self.assertEqual(ctfs.player(self.ctf.id, self.player.id).status, "joined")
+        self.assertEqual(ctfs.player(self.ctf.id, self.player.id).status, ctfs.PlayerStatus.JOINED)
 
     async def test_a_click_on_a_closed_card_meanwhile_is_told_it_was_handled(self):
         waiting, card = await self.ask_to_join()

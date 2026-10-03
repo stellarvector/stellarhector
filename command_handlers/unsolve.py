@@ -16,6 +16,10 @@ async def unsolve(interaction):
         await interaction.response.send_message(f":no_entry: {ctf_challenges.NOT_IN_CHALLENGE}", ephemeral=True)
         return
 
+    if location.ctf.locked_at is not None:
+        await interaction.response.send_message(f":no_entry: {ctf_places.LOCKED}", ephemeral=True)
+        return
+
     await interaction.response.defer(thinking=True)
 
     if not await ctf_challenges.mark_solved(interaction.guild, location.ctf, interaction.channel, challenge, False):

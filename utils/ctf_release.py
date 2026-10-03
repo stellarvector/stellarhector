@@ -31,26 +31,14 @@ async def release(guild, ctf, member_role_name, now):
     if member_role is None:
         raise ReleaseRefused("The member role is not configured or no longer exists.")
 
-    await _open_to(category, member_role, ctf)
+    # Writing is not denied, so members write as they do elsewhere on the server; public threads follow their channel
+    await ctf_places.update_category_overwrites(ctf, category, {member_role: {"view_channel": True}})
     if not ctfs.mark_released(ctf.id, now):
         raise _already_released(name, ctfs.get(ctf.id))
     await ctf_join.close_joining(guild, ctf)
 
     logging.getLogger("bot").info(f"Released CTF {ctf.name!r}")
     return ctfs.get(ctf.id)
-
-
-async def _open_to(category, role, ctf):
-    """Let role see the category, keeping its other overwrites, and sync every channel in it but #bot to it. Writing
-    is not denied, so role writes as it does elsewhere on the server; public threads follow their channel."""
-    overwrites = dict(category.overwrites)
-    overwrite = discord.PermissionOverwrite(**dict(overwrites.get(role, discord.PermissionOverwrite())))
-    overwrite.update(view_channel=True)
-    overwrites[role] = overwrite
-    await category.edit(overwrites=overwrites)
-
-    for channel in ctf_places.without_bot_channel(ctf, category.channels):
-        await channel.edit(sync_permissions=True)
 
 
 def _already_released(name, ctf):

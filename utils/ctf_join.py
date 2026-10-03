@@ -16,7 +16,7 @@ from enum import Enum
 
 import discord
 
-from utils import ctfs, ctftime_check
+from utils import ctfs, ctftime_check, discord_objects
 from utils.text import cut
 
 # How many players the join message names, and how many on-campus sessions it lists, to stay under 2000 characters
@@ -103,19 +103,14 @@ def approval_view(ctf_id, user_id):
     return view
 
 
-def is_closed(ctf):
-    """Whether joining the CTF is closed: it is released (open to all members) or locked, or further along."""
-    return any(at is not None for at in (ctf.released_at, ctf.locked_at, ctf.archived_at, ctf.removed_at))
-
-
 def decide(role_names, roles, status, closed):
-    """The Outcome of a Join click by someone with these role names. status is theirs on the CTF's player list
-    ("joined", "pending", or None when they are not on it); closed is whether joining the CTF is closed."""
-    if status == "joined":
+    """The Outcome of a Join click by someone with these role names. status is their ctfs.PlayerStatus on the CTF's
+    player list, or None when they are not on it; closed is whether joining the CTF is closed."""
+    if status is ctfs.PlayerStatus.JOINED:
         return Outcome.ALREADY_JOINED
     if closed:
         return Outcome.CLOSED
-    if status == "pending":
+    if status is ctfs.PlayerStatus.PENDING:
         return Outcome.STILL_PENDING
     if roles.trusted & set(role_names):
         return Outcome.JOINED
@@ -212,7 +207,7 @@ async def last_call(guild, ctf, channel_id, now):
     async with _refresh_locks[ctf.id]:
         # As stored now: joining may have closed since ctf was read
         old = ctfs.get(ctf.id)
-        if is_closed(ctf) or is_closed(old):
+        if ctf.joining_closed or old.joining_closed:
             raise LastCallRefused(f"Joining **{discord.utils.escape_markdown(ctf.name)}** is closed, there is no "
                                   f"last call to make.")
 
@@ -271,7 +266,7 @@ async def close_joining(guild, ctf):
     """Now that the CTF is released, show on its join message that joining is closed, with its Join button disabled,
     and close the approval cards of who still waits: they are taken off the player list, and their cards say they are
     no longer needed, without buttons. Messages that can't be edited are logged; one deleted by hand is fine."""
-    pending = [player for player in ctfs.players(ctf.id) if player.status == "pending"]
+    pending = [player for player in ctfs.players(ctf.id) if player.status is ctfs.PlayerStatus.PENDING]
     # Off the list before the first await, so a click on one of their cards meanwhile is told it was already handled
     for player in pending:
         ctfs.remove_player(ctf.id, player.user_id)
@@ -305,7 +300,7 @@ def current_join_message(ctf, now=None):
 
 def joined_ids(ctf_id):
     """The user IDs of who plays the CTF (not who waits for a moderator), in the order they joined."""
-    return [player.user_id for player in ctfs.players(ctf_id) if player.status == "joined"]
+    return [player.user_id for player in ctfs.players(ctf_id) if player.status is ctfs.PlayerStatus.JOINED]
 
 
 def current_sessions(ctf, now):
@@ -391,7 +386,7 @@ async def _join(interaction, ctf_id):
         return ":no_entry: This CTF no longer exists."
 
     entry = ctfs.player(ctf.id, member.id)
-    outcome = decide({role.name for role in member.roles}, _roles, entry and entry.status, is_closed(ctf))
+    outcome = decide({role.name for role in member.roles}, _roles, entry and entry.status, ctf.joining_closed)
     main = f"<#{ctf.main_channel_id}>"
     name = discord.utils.escape_markdown(ctf.name)
 
@@ -443,7 +438,7 @@ async def _ask_moderators(guild, member, ctf):
     except BaseException:
         ctfs.remove_player(ctf.id, member.id)
         raise
-    if not ctfs.set_approval_card(ctf.id, member.id, card.id) and is_closed(ctfs.get(ctf.id)):
+    if not ctfs.set_approval_card(ctf.id, member.id, card.id) and ctfs.get(ctf.id).joining_closed:
         # Released while the card was posted, after its pending players were taken off the list
         await _close_card(bot_channel, card.id)
         return f":no_entry: Joining **{discord.utils.escape_markdown(ctf.name)}** is closed."
@@ -475,7 +470,7 @@ async def _decide(interaction, decision, ctf_id, user_id):
     if ctf is None:
         return ":no_entry: This CTF no longer exists."
 
-    member = await _member(guild, user_id)
+    member = await discord_objects.member(guild, user_id)
     ctf_role = guild.get_role(ctf.role_id)
     if decision is not Decision.DECLINE:
         if member is None:
@@ -485,7 +480,7 @@ async def _decide(interaction, decision, ctf_id, user_id):
 
     # Checked and settled before the next await, so a second click on the card is told it was already handled
     entry = ctfs.player(ctf.id, user_id)
-    if entry is None or entry.status != "pending" or entry.approval_card_message_id != interaction.message.id:
+    if entry is None or entry.status is not ctfs.PlayerStatus.PENDING or entry.approval_card_message_id != interaction.message.id:
         return "This request was already handled."
 
     if decision is Decision.DECLINE:
@@ -520,7 +515,7 @@ async def _accept(guild, member, ctf, ctf_role, entry, decision):
     try:
         await member.add_roles(*roles)
     except BaseException:
-        if is_closed(ctfs.get(ctf.id)):
+        if ctfs.get(ctf.id).joining_closed:
             # Released meanwhile: no longer waiting, the card is closed
             ctfs.remove_player(ctf.id, member.id)
         else:
@@ -539,14 +534,3 @@ async def _send_decline(member, ctf):
     except discord.HTTPException:
         return False
     return True
-
-
-async def _member(guild, user_id):
-    """The member with this ID, or None when they are no longer on the server."""
-    member = guild.get_member(user_id)
-    if member is not None:
-        return member
-    try:
-        return await guild.fetch_member(user_id)
-    except discord.NotFound:
-        return None

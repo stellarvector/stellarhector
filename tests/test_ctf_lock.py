@@ -1,3 +1,4 @@
+import itertools
 import tempfile
 import unittest
 from pathlib import Path
@@ -20,8 +21,12 @@ LOCK_ROLES = ctf_lock.LockRoles(member="sv{member}",
                                 writers=frozenset({"sv{admin}", "sv{manager}", "sv{moderator}"}))
 
 
+_thread_ids = itertools.count(1)
+
+
 class FakeThread:
     def __init__(self, name, archived=False, private=False):
+        self.id = next(_thread_ids)
         self.name, self.archived, self.locked, self.private = name, archived, False, private
 
     async def edit(self, archived=None, locked=None):

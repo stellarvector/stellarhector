@@ -1,5 +1,6 @@
 from dataclasses import dataclass, fields
 from datetime import datetime
+from enum import Enum
 
 from core import db
 
@@ -18,6 +19,15 @@ class NewCtf:
     guide_message_id: int
 
 
+class Stage(Enum):
+    """How far a CTF is in its lifecycle; the value names it for the user."""
+    SET_UP = "set up"
+    RELEASED = "released"
+    LOCKED = "locked"
+    ARCHIVED = "archived"
+    REMOVED = "removed"
+
+
 @dataclass(frozen=True)
 class Ctf(NewCtf):
     """A stored CTF: what it was created with, where its join message is (None when it was not posted), its challenge
@@ -33,6 +43,20 @@ class Ctf(NewCtf):
     archived_at: datetime | None
     removal_reminded_at: datetime | None
     removed_at: datetime | None
+
+    @property
+    def stage(self):
+        """The furthest Stage the CTF reached. An archive can be made before the lock, by /archive-ctf."""
+        for at, stage in [(self.removed_at, Stage.REMOVED), (self.archived_at, Stage.ARCHIVED),
+                          (self.locked_at, Stage.LOCKED), (self.released_at, Stage.RELEASED)]:
+            if at is not None:
+                return stage
+        return Stage.SET_UP
+
+    @property
+    def joining_closed(self):
+        """Whether joining the CTF is closed: it is released (open to all members), or further along."""
+        return self.stage is not Stage.SET_UP
 
 
 _TIMES = {"start", "finish", "last_call_at", "released_at", "locked_at", "archived_at", "removal_reminded_at",
@@ -171,11 +195,18 @@ def mark_removed(ctf_id, at):
         conn.execute("UPDATE ctfs SET removed_at = ? WHERE id = ?", (db.time_text(at), ctf_id))
 
 
+class PlayerStatus(Enum):
+    """Where someone on a CTF's player list is; the value is how it is stored."""
+    JOINED = "joined"
+    # Waiting for a moderator's decision on their approval card
+    PENDING = "pending"
+
+
 @dataclass(frozen=True)
 class Player:
-    """Someone on a CTF's player list: status is "joined" or "pending" (waiting for a moderator's approval card)."""
+    """Someone on a CTF's player list, with their PlayerStatus."""
     user_id: int
-    status: str
+    status: PlayerStatus
     approval_card_message_id: int | None
     joined_at: datetime
 
@@ -334,7 +365,7 @@ def _challenge(row):
 
 
 def _player(row):
-    return Player(user_id=row["user_id"], status=row["status"],
+    return Player(user_id=row["user_id"], status=PlayerStatus(row["status"]),
                   approval_card_message_id=row["approval_card_message_id"], joined_at=db.parse_time(row["joined_at"]))
 
 

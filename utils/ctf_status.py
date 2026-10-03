@@ -1,23 +1,12 @@
 """The text of /ctf-status: one line per CTF the bot manages, with its stage, its next automatic step and its players."""
 import discord
 
-from utils import ctf_timeline, text
+from utils import ctf_timeline, ctfs, text
 
 # Discord refuses messages longer than this
 MESSAGE_LIMIT = 2000
 
 NONE_MANAGED = "No CTFs are managed by the bot right now."
-
-
-def stage(ctf):
-    """How far the CTF is in its lifecycle: "set up", "released", "locked" or "archived"."""
-    if ctf.archived_at is not None:
-        return "archived"
-    if ctf.locked_at is not None:
-        return "locked"
-    if ctf.released_at is not None:
-        return "released"
-    return "set up"
 
 
 def line(ctf, players, guild_id, now):
@@ -31,7 +20,7 @@ def line(ctf, players, guild_id, now):
         parts.append(f"[CTFtime](<https://ctftime.org/event/{ctf.ctftime_id}/>)")
     if ctf.start is not None and ctf.finish is not None:
         parts.append(f"<t:{int(ctf.start.timestamp())}:f> – <t:{int(ctf.finish.timestamp())}:f>")
-    parts += [stage(ctf), f"next: {_next(ctf, now)}", _players(players)]
+    parts += [ctf.stage.value, f"next: {_next(ctf, now)}", _players(players)]
     return " · ".join(parts)
 
 
@@ -62,5 +51,5 @@ def _next(ctf, now):
 
 
 def _players(players):
-    joined = sum(player.status == "joined" for player in players)
+    joined = sum(player.status is ctfs.PlayerStatus.JOINED for player in players)
     return f"{joined} joined, {len(players) - joined} pending"

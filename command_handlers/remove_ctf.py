@@ -10,7 +10,7 @@ import discord
 from discord import app_commands
 from error_handlers.permissions import check_role_error
 from error_handlers.default import default as default_error_handler
-from utils import ctf_places, ctfs
+from utils import ctf_places, ctfs, discord_objects
 from utils.ctf_places import Place
 
 
@@ -32,14 +32,15 @@ async def remove_ctf(interaction: discord.Interaction, force: bool = False):
     guild = interaction.guild
     category = guild.get_channel(ctf.category_id)
     content = [] if category is None else ctf_places.without_bot_channel(ctf, category.channels)
-    not_deleted = await _delete([*content, guild.get_role(ctf.role_id)])
+    not_deleted = await discord_objects.delete_all([*content, guild.get_role(ctf.role_id)], "of a removed CTF")
     if not_deleted:
         # #bot and the CTF's row stay, so the command can be run here again
         await interaction.edit_original_response(content=f":warning: These could not be deleted: {', '.join(not_deleted)}\nDelete them by hand or run `/remove-ctf` again.")
         return
 
     # The reply was in #bot, which is deleted now as well, so the admins are told in the admin channel
-    not_deleted = await _delete([guild.get_channel(ctf.bot_channel_id), category])
+    not_deleted = await discord_objects.delete_all([guild.get_channel(ctf.bot_channel_id), category],
+                                                  "of a removed CTF")
     ctfs.mark_removed(ctf.id, datetime.now(timezone.utc))
     logging.getLogger("bot").info(f"CTF {ctf.name!r} removed by {interaction.user}")
 
@@ -47,20 +48,6 @@ async def remove_ctf(interaction: discord.Interaction, force: bool = False):
     if not_deleted:
         message += f"\n:warning: These could not be deleted, delete them by hand: {', '.join(not_deleted)}"
     await bot.alert_admins(message)
-
-async def _delete(discord_objects):
-    """Delete each of the Discord objects that exists (None is skipped); a failure is logged and the rest is still
-    deleted. Returns the names of the ones that could not be deleted."""
-    not_deleted = []
-    for discord_object in discord_objects:
-        if discord_object is None:
-            continue
-        try:
-            await discord_object.delete()
-        except Exception:
-            logging.getLogger("bot").exception(f"Could not delete {discord_object!r} of a removed CTF")
-            not_deleted.append(f"`{discord_object.name}`")
-    return not_deleted
 
 @remove_ctf.error
 async def remove_ctf_error(interaction, error):

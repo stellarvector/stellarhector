@@ -64,7 +64,7 @@ def plan(ctf, now):
     lock = _lock_at(ctf.finish)
     steps = [
         (Step.LAST_CALL, ctf.start - timedelta(days=1), ctf.last_call_at is None and now < ctf.start
-                                                       and not _joining_closed(ctf)),
+                                                       and not ctf.joining_closed),
         (Step.RELEASE, ctf.finish + timedelta(days=1), ctf.released_at is None and ctf.locked_at is None),
         (Step.LOCK, lock, ctf.locked_at is None),
         (Step.REMOVAL_REMINDER, lock + timedelta(weeks=4), ctf.removal_reminded_at is None),
@@ -74,10 +74,6 @@ def plan(ctf, now):
 
 def _lock_at(finish):
     return finish + timedelta(days=5)
-
-
-def _joining_closed(ctf):
-    return ctf.released_at is not None or ctf.locked_at is not None
 
 
 def is_manual(ctf):

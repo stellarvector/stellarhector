@@ -5,7 +5,7 @@ from pathlib import Path
 
 import discord
 
-from utils import ctf_join, ctfs, ctftime
+from utils import ctf_join, ctfs, ctftime, discord_objects
 
 # The guide posted as the first message in a CTF's main channel; change the text there, not here
 GUIDE = (Path(__file__).parent / "templates" / "ctf_guide.md").read_text()
@@ -61,7 +61,7 @@ async def setup_ctf(guild, name, ctftime_id, settings, get_event=ctftime.get_eve
             ctf = await _post_join_message(guild, ctf, settings.upcoming_channel_id, created)
         except BaseException:
             logging.getLogger("bot").exception(f"Setting up CTF {name!r} failed, removing what was created")
-            await _delete(created)
+            await discord_objects.delete_all(reversed(created), "of a failed CTF setup, delete it by hand")
             if ctf is not None:
                 ctfs.delete(ctf.id)
             raise
@@ -144,12 +144,3 @@ async def _post_join_message(guild, ctf, channel_id, created):
     created.append(message)
     ctfs.set_join_message(ctf.id, channel.id, message.id)
     return ctfs.get(ctf.id)
-
-
-async def _delete(created):
-    """Delete the created Discord objects, newest first. A failure is logged, and the rest is still deleted."""
-    for thing in reversed(created):
-        try:
-            await thing.delete()
-        except Exception:
-            logging.getLogger("bot").exception(f"Could not delete {thing!r} of a failed CTF setup, delete it by hand")

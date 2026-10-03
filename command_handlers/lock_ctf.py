@@ -4,18 +4,13 @@
 from datetime import datetime, timezone
 
 import core.bot as bot
-import core.config as config_helpers
+import core.ctf_settings as ctf_settings
 import discord
 from discord import app_commands
 from error_handlers.permissions import check_role_error
 from error_handlers.default import default as default_error_handler
 from utils import ctf_archive, ctf_lock, ctf_places
 from utils.ctf_places import Place
-
-
-def lock_roles():
-    return ctf_lock.LockRoles(member=config_helpers.role_name(bot.config, "MEMBER_ROLE"),
-                              writers=frozenset(bot.STAFF_ROLES))
 
 
 @bot.client.tree.command(name="lock-ctf", description="Make the CTF read-only and archive it", guild=bot.guild)
@@ -28,7 +23,7 @@ async def lock_ctf(interaction: discord.Interaction):
     await interaction.response.defer(thinking=True)
 
     try:
-        locked = await ctf_lock.lock(interaction.guild, location.ctf, lock_roles(), datetime.now(timezone.utc),
+        locked = await ctf_lock.lock(interaction.guild, location.ctf, ctf_settings.lock_roles(), datetime.now(timezone.utc),
                                      ctf_archive.archive)
     except ctf_lock.LockRefused as e:
         await interaction.edit_original_response(content=f":no_entry: {e}")

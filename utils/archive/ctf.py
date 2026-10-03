@@ -6,6 +6,7 @@ import asyncio
 import datetime
 import core.bot as bot
 import os
+import shutil
 
 # The folder of a CTF's archive (and of each category in it) has its attachments in this folder
 ATTACHMENTS_FOLDER = "attachments"
@@ -22,6 +23,10 @@ class CtfArchive():
 
         self.name = ctf
         self.year = datetime.datetime.now().year
+        # What generate_files changed, for discard_files: the folders it made, and the files it edited with their
+        # content from before
+        self.__made_folders: list[str] = []
+        self.__edited_files: dict[str, str] = {}
 
         self.__main: ChallengeArchive | None = None
         if main_channel is not None:
@@ -36,7 +41,19 @@ class CtfArchive():
 
         return self
 
+    def discard_files(self):
+        """Undo what generate_files did, also when it failed halfway: remove the folders it made and put back the
+        indexes it edited, so a new try starts afresh."""
+        for path, content in self.__edited_files.items():
+            with open(path, "w") as f:
+                f.write(content)
+        for folder in reversed(self.__made_folders):
+            shutil.rmtree(folder, ignore_errors=True)
+        self.__made_folders, self.__edited_files = [], {}
+
     def generate_files(self):
+        """Write the archive's pages and attachments, and link it from the (new) year's index. Blocking (attachments
+        are downloaded): run it off the event loop."""
         archive_path = bot.config.get("ARCHIVE_LOCAL_PATH")
 
         pages = self.pages()
@@ -49,8 +66,6 @@ class CtfArchive():
         if not ctf_path:
             raise RuntimeError("No CTF name could be found")
 
-        self.add_ctf_to_year_index(archive_path, ctf_path, pages[0].path)
-
         ctf_folder = f"{self.year}/{ctf_path}"
         if self.__main is not None:
             self.write_page(archive_path, ctf_folder, self.__main, self.__main.fetch_data(
@@ -62,6 +77,9 @@ class CtfArchive():
 
             for challenge in category.challenges:
                 self.write_page(archive_path, ctf_folder, challenge, challenge.fetch_data(attachments))
+
+        # Last, so the index never links to a CTF whose pages failed
+        self.add_ctf_to_year_index(archive_path, ctf_path, pages[0].path)
 
     def pages(self):
         """Every page of the archive, in the order of the navigation."""
@@ -109,6 +127,7 @@ class CtfArchive():
             return
 
         os.makedirs(f"{archive_path}/{self.year}")
+        self.__made_folders.append(year_folder_path)
 
         year_link_template = bot.jinja_env.get_template("yearlink.html")
         year_link_html = year_link_template.render(year=self.year)
@@ -116,6 +135,7 @@ class CtfArchive():
         index_path = os.path.join(archive_path, "index.html")
         with open(index_path, "r+") as index_file:
             index_html = index_file.read()
+            self.__edited_files.setdefault(index_path, index_html)
             index_file.seek(0)
             index_html = index_html.replace("<!--add-year-->", year_link_html)
             index_file.write(index_html)
@@ -136,6 +156,7 @@ class CtfArchive():
 
             ctf_path = f"{self.name}" + ('' if i == 0 else f'-{i}')
             os.makedirs(f"{archive_path}/{self.year}/{ctf_path}")
+            self.__made_folders.append(f"{archive_path}/{self.year}/{ctf_path}")
             break
 
         return ctf_path
@@ -147,23 +168,36 @@ class CtfArchive():
         year_index_path = os.path.join(archive_path, str(self.year), "index.html")
         with open(year_index_path, "r+") as year_file:
             year_html = year_file.read()
+            self.__edited_files.setdefault(year_index_path, year_html)
             year_file.seek(0)
             year_html = year_html.replace("<!--add-ctf-->", ctf_link_html)
             year_file.write(year_html)
 
     async def save(self):
+        """Commit and push the generated files, as the settings say. A commit that could not be pushed is undone,
+        keeping the files."""
         await asyncio.to_thread(self._save)
 
     def _save(self):
         repository = CtfArchive.get_archive_repository()
         if int(bot.config.get("SHOULD_COMMIT")):
             repository = Repo(bot.config.get("ARCHIVE_LOCAL_PATH"))
-            repository.index.add('*')
-            repository.index.commit(f"Archive {self.name} {self.year}")
+            try:
+                repository.index.add('*')
+                repository.index.commit(f"Archive {self.name} {self.year}")
+            except BaseException:
+                # Nothing staged stays behind, as discard_files takes the files away
+                repository.head.reset(index=True, working_tree=False)
+                raise
 
             if int(bot.config.get("SHOULD_PUSH")):
                 origin = repository.remote(name="origin")
-                origin.push()
+                try:
+                    origin.push()
+                except BaseException:
+                    # Back to before the commit, keeping the files, which discard_files then takes away
+                    repository.head.reset("HEAD~1", index=True, working_tree=False)
+                    raise
 
     # git clone, pull and push can take a while; they run in a thread so the event loop
     # (and with it the scheduler heartbeat) keeps going

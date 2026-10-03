@@ -1,5 +1,6 @@
 from utils.archive.message import MessageArchive
 from utils.archive.naming import relative_link, unique_name
+from utils import discord_objects
 import discord
 
 # The category's own page in its folder; no challenge page may take its name
@@ -25,19 +26,10 @@ class CategoryArchive():
         self.challenges: list[ChallengeThreadArchive] = [
             await ChallengeThreadArchive.init(
                 thread, f"{folder}/{unique_name(thread.name, taken, fallback=f'thread-{thread.id}')}.html")
-                for thread in await CategoryArchive.threads(channel)
+                for thread in await discord_objects.all_threads(channel)
         ]
 
         return self
-
-    @staticmethod
-    async def threads(channel):
-        """All threads of the channel, active and archived (public and private), oldest first."""
-        threads = {thread.id: thread for thread in channel.threads}
-        for private in (False, True):
-            threads.update({thread.id: thread async for thread in channel.archived_threads(private=private, limit=None)})
-
-        return sorted(threads.values(), key=lambda thread: thread.id)
 
     def fetch_data(self, attachment_path):
         """The category page's messages, with a link to a challenge's page at the message its thread was made on, or

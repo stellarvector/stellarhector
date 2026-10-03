@@ -6,10 +6,8 @@ import asyncio
 from datetime import datetime, timedelta, timezone
 
 import core.bot as bot
-import core.config as config_helpers
+import core.ctf_settings as ctf_settings
 import core.scheduler as scheduler
-from command_handlers.lock_ctf import lock_roles
-from command_handlers.setup_ctf import settings as setup_settings
 from utils import ctf_archive, ctf_join, ctf_lock, ctf_release, ctf_setup, ctf_timeline
 
 # A lock archives the CTF, git push included, which can take a while; stopping it halfway would leave it unarchived
@@ -23,18 +21,18 @@ class Actions:
         self.guild = guild
 
     async def setup(self, ctftime_id, title):
-        return await ctf_setup.setup_ctf(self.guild, title, ctftime_id, setup_settings())
+        return await ctf_setup.setup_ctf(self.guild, title, ctftime_id, ctf_settings.setup_settings())
 
     async def last_call(self, ctf, now):
         ctf = await ctf_join.last_call(self.guild, ctf, bot.channel_id("UPCOMING_CTFS_CHANNEL_ID"), now)
         return f":robot: Automatic last call: the join message is posted again in <#{ctf.join_channel_id}>."
 
     async def release(self, ctf, now):
-        await ctf_release.release(self.guild, ctf, config_helpers.role_name(bot.config, "MEMBER_ROLE"), now)
+        await ctf_release.release(self.guild, ctf, bot.MEMBER_ROLE, now)
         return ":robot: Released automatically: every member can read and write in the CTF now, and joining is closed."
 
     async def lock(self, ctf, now):
-        locked = await ctf_lock.lock(self.guild, ctf, lock_roles(), now, ctf_archive.archive)
+        locked = await ctf_lock.lock(self.guild, ctf, ctf_settings.lock_roles(), now, ctf_archive.archive)
         return f":robot: Automatic lock: {locked.notice}"
 
 

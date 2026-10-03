@@ -5,7 +5,7 @@ from dataclasses import dataclass
 
 import discord
 
-from utils import ctf_places, ctf_release, ctfs
+from utils import ctf_places, ctf_release, ctfs, discord_objects
 
 # Taken from everyone but the writers, in the category and every channel synced to it, threads included
 _WRITING = ("send_messages", "send_messages_in_threads", "create_public_threads", "create_private_threads",
@@ -73,9 +73,13 @@ async def lock(guild, ctf, roles, now, archive):
     # A CTF role deleted by hand is skipped
     readers = [role for role in (guild.default_role, member_role, guild.get_role(ctf.role_id)) if role is not None]
     writers = [role for role in guild.roles if role.name in roles.writers]
-    await _make_read_only(category, readers, writers, ctf)
+    # Writers are allowed explicitly: an allow on one of a member's roles wins over a deny on another, and staff are
+    # members too
+    await ctf_places.update_category_overwrites(ctf, category, {
+        **{role: dict.fromkeys(_WRITING, False) for role in readers},
+        **{role: dict.fromkeys(_WRITING, True) for role in writers}})
     for channel in ctf_places.without_bot_channel(ctf, category.channels):
-        for thread in await _threads(channel):
+        for thread in await discord_objects.all_threads(channel):
             await _archive_and_lock(thread)
     if not ctfs.mark_locked(ctf.id, now):
         raise _already_locked(name, ctfs.get(ctf.id))
@@ -95,32 +99,6 @@ async def _archive_and_lock(thread):
     if thread.archived:
         await thread.edit(archived=False, locked=True)
     await thread.edit(archived=True, locked=True)
-
-
-async def _threads(channel):
-    """All threads of channel: the active ones, also made by hand, and the archived public and private ones. A
-    channel that can't have threads (e.g. a voice channel) has none."""
-    if not hasattr(channel, "archived_threads"):
-        return []
-    threads = list(channel.threads)
-    for private in (False, True):
-        threads += [thread async for thread in channel.archived_threads(private=private, limit=None)]
-    return threads
-
-
-async def _make_read_only(category, readers, writers, ctf):
-    """Deny the readers writing on the category and allow it the writers, keeping their other overwrites, and sync
-    every channel in it but #bot to it. Writers are allowed explicitly: an allow on one of a member's roles wins over
-    a deny on another, and staff are members too."""
-    overwrites = dict(category.overwrites)
-    for role, allowed in [*((role, False) for role in readers), *((role, True) for role in writers)]:
-        overwrite = discord.PermissionOverwrite(**dict(overwrites.get(role, discord.PermissionOverwrite())))
-        overwrite.update(**{permission: allowed for permission in _WRITING})
-        overwrites[role] = overwrite
-    await category.edit(overwrites=overwrites)
-
-    for channel in ctf_places.without_bot_channel(ctf, category.channels):
-        await channel.edit(sync_permissions=True)
 
 
 def _already_locked(name, ctf):

@@ -167,7 +167,7 @@ class PlayersTest(unittest.TestCase):
     def test_added_player_is_joined(self):
         ctfs.add_player(self.ctf.id, 42, utc(2026, 10, 3, 12))
 
-        self.assertEqual(ctfs.players(self.ctf.id), [ctfs.Player(user_id=42, status="joined",
+        self.assertEqual(ctfs.players(self.ctf.id), [ctfs.Player(user_id=42, status=ctfs.PlayerStatus.JOINED,
                                                                   approval_card_message_id=None,
                                                                   joined_at=utc(2026, 10, 3, 12))])
 
@@ -183,13 +183,13 @@ class PlayersTest(unittest.TestCase):
 
         ctfs.add_player(self.ctf.id, 42, utc(2026, 10, 4, 12))
 
-        self.assertEqual(ctfs.players(self.ctf.id), [ctfs.Player(user_id=42, status="joined",
+        self.assertEqual(ctfs.players(self.ctf.id), [ctfs.Player(user_id=42, status=ctfs.PlayerStatus.JOINED,
                                                                   approval_card_message_id=None,
                                                                   joined_at=utc(2026, 10, 3, 12))])
 
     def test_player_asking_to_join_is_pending_until_their_approval_card_is_posted(self):
         ctfs.add_pending_player(self.ctf.id, 42, utc(2026, 10, 3, 12))
-        self.assertEqual(ctfs.player(self.ctf.id, 42), ctfs.Player(user_id=42, status="pending",
+        self.assertEqual(ctfs.player(self.ctf.id, 42), ctfs.Player(user_id=42, status=ctfs.PlayerStatus.PENDING,
                                                                    approval_card_message_id=None,
                                                                    joined_at=utc(2026, 10, 3, 12)))
 
@@ -232,8 +232,8 @@ class PlayersTest(unittest.TestCase):
         ctfs.reopen_request(self.ctf.id, 43, utc(2026, 10, 3, 13), 78)
 
         self.assertEqual(ctfs.players(self.ctf.id), [
-            ctfs.Player(user_id=42, status="pending", approval_card_message_id=77, joined_at=utc(2026, 10, 3, 12)),
-            ctfs.Player(user_id=43, status="pending", approval_card_message_id=78, joined_at=utc(2026, 10, 3, 13))])
+            ctfs.Player(user_id=42, status=ctfs.PlayerStatus.PENDING, approval_card_message_id=77, joined_at=utc(2026, 10, 3, 12)),
+            ctfs.Player(user_id=43, status=ctfs.PlayerStatus.PENDING, approval_card_message_id=78, joined_at=utc(2026, 10, 3, 13))])
 
     def test_times_joined_counts_the_ctfs_the_user_joined_not_those_they_wait_for(self):
         other, third = ctfs.create(new_ctf(name="Bar CTF")), ctfs.create(new_ctf(name="Baz CTF"))

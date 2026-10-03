@@ -213,7 +213,7 @@ class ApprovalCardTest(unittest.IsolatedAsyncioTestCase):
         return interaction.replies
 
     def assert_still_pending(self, card):
-        self.assertEqual(ctfs.player(self.ctf.id, self.player.id).status, "pending")
+        self.assertEqual(ctfs.player(self.ctf.id, self.player.id).status, ctfs.PlayerStatus.PENDING)
         self.assertIsNotNone(card.view)
         self.assertNotIn(self.guild.role("Foo CTF"), self.player.roles)
 
@@ -244,7 +244,7 @@ class ApprovalCardTest(unittest.IsolatedAsyncioTestCase):
 
         self.assertIn(self.guild.role("Foo CTF"), self.player.roles)
         self.assertNotIn(self.guild.role("sv{known-player}"), self.player.roles)
-        self.assertEqual(ctfs.player(self.ctf.id, self.player.id).status, "joined")
+        self.assertEqual(ctfs.player(self.ctf.id, self.player.id).status, ctfs.PlayerStatus.JOINED)
         self.assertIn(f"**Playing (1):** <@{self.player.id}>", self.join_message.content)
         self.assertTrue(card.content.endswith(f"**CTFs joined before:** 0\n"
                                               f":white_check_mark: Accepted by <@{self.moderator.id}>"))
@@ -258,7 +258,7 @@ class ApprovalCardTest(unittest.IsolatedAsyncioTestCase):
 
         self.assertIn(self.guild.role("Foo CTF"), self.player.roles)
         self.assertIn(self.guild.role("sv{known-player}"), self.player.roles)
-        self.assertEqual(ctfs.player(self.ctf.id, self.player.id).status, "joined")
+        self.assertEqual(ctfs.player(self.ctf.id, self.player.id).status, ctfs.PlayerStatus.JOINED)
         self.assertTrue(card.content.endswith(
             f"\n:white_check_mark: Accepted as known player by <@{self.moderator.id}>"))
         self.assertIsNone(card.view)
@@ -332,7 +332,7 @@ class ApprovalCardTest(unittest.IsolatedAsyncioTestCase):
                                              self.click(admin, Decision.DECLINE))
 
         self.assertEqual((first, second), ([], [("This request was already handled.", True)]))
-        self.assertEqual(ctfs.player(self.ctf.id, self.player.id).status, "joined")
+        self.assertEqual(ctfs.player(self.ctf.id, self.player.id).status, ctfs.PlayerStatus.JOINED)
         self.assertEqual(self.player.dms, [])
         self.assertTrue(card.content.endswith(f"\n:white_check_mark: Accepted by <@{self.moderator.id}>"))
 
@@ -352,7 +352,7 @@ class ApprovalCardTest(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(await self.click(self.moderator, Decision.ACCEPT, card=old),
                          [("This request was already handled.", True)])
-        self.assertEqual(ctfs.player(self.ctf.id, self.player.id).status, "pending")
+        self.assertEqual(ctfs.player(self.ctf.id, self.player.id).status, ctfs.PlayerStatus.PENDING)
 
     async def test_someone_who_left_the_server_cannot_be_accepted_but_can_be_declined(self):
         await self.join(self.player)
@@ -362,7 +362,7 @@ class ApprovalCardTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(await self.click(self.moderator, Decision.ACCEPT),
                          [(f"<@{self.player.id}> is no longer on the server, **Decline** to close this request.",
                            True)])
-        self.assertEqual(ctfs.player(self.ctf.id, self.player.id).status, "pending")
+        self.assertEqual(ctfs.player(self.ctf.id, self.player.id).status, ctfs.PlayerStatus.PENDING)
         self.assertIsNotNone(card.view)
 
         await self.click(self.moderator, Decision.DECLINE)

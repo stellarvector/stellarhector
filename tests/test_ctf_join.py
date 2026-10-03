@@ -46,10 +46,10 @@ class DecideTest(unittest.TestCase):
         self.assertEqual(decide(), Outcome.NO_PLAYER_ROLE)
 
     def test_someone_who_joined_already_is_told_so(self):
-        self.assertEqual(decide("sv{core-player}", status="joined"), Outcome.ALREADY_JOINED)
+        self.assertEqual(decide("sv{core-player}", status=ctfs.PlayerStatus.JOINED), Outcome.ALREADY_JOINED)
 
     def test_someone_who_already_asked_is_still_waiting_and_gets_no_second_card(self):
-        self.assertEqual(decide("sv{player}", status="pending"), Outcome.STILL_PENDING)
+        self.assertEqual(decide("sv{player}", status=ctfs.PlayerStatus.PENDING), Outcome.STILL_PENDING)
 
     def test_nobody_can_join_once_joining_is_closed(self):
         for roles in (("sv{core-player}",), ("sv{player}",), ("sv{admin}",), ()):
@@ -57,10 +57,10 @@ class DecideTest(unittest.TestCase):
                 self.assertEqual(decide(*roles, closed=True), Outcome.CLOSED)
 
     def test_someone_still_waiting_when_joining_closes_is_told_it_is_closed(self):
-        self.assertEqual(decide("sv{player}", status="pending", closed=True), Outcome.CLOSED)
+        self.assertEqual(decide("sv{player}", status=ctfs.PlayerStatus.PENDING, closed=True), Outcome.CLOSED)
 
     def test_someone_who_joined_is_told_they_play_even_once_joining_is_closed(self):
-        self.assertEqual(decide("sv{core-player}", status="joined", closed=True), Outcome.ALREADY_JOINED)
+        self.assertEqual(decide("sv{core-player}", status=ctfs.PlayerStatus.JOINED, closed=True), Outcome.ALREADY_JOINED)
 
     def test_without_a_configured_player_role_a_member_must_ask_a_moderator(self):
         roles = ctf_join.JoinRoles(trusted=frozenset({"sv{core-player}"}), player=None)

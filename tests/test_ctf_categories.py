@@ -7,7 +7,7 @@ import discord
 
 from core import db
 from tests.test_ctfs import new_ctf
-from utils import ctf_categories, ctfs
+from utils import ctf_categories, ctf_places, ctfs
 
 _ids = itertools.count(1000)
 
@@ -111,23 +111,23 @@ class SplitNamesTest(unittest.TestCase):
         self.assertEqual(ctf_categories.split_names(" web,, ,crypto, "), ["web", "crypto"])
 
 
-class MayAddTest(unittest.TestCase):
+class MayPlayTest(unittest.TestCase):
     def setUp(self):
         self.ctf_role = FakeRole("⚡ Foo CTF")
         self.ctf = new_ctf(role_id=self.ctf_role.id)
 
     def test_players_of_the_ctf_may(self):
-        self.assertTrue(ctf_categories.may_add(FakeMember(FakeRole("sv{member}"), self.ctf_role), self.ctf, STAFF))
+        self.assertTrue(ctf_places.may_play(FakeMember(FakeRole("sv{member}"), self.ctf_role), self.ctf, STAFF))
 
     def test_staff_may(self):
         for name in STAFF:
             with self.subTest(name):
-                self.assertTrue(ctf_categories.may_add(FakeMember(FakeRole(name)), self.ctf, STAFF))
+                self.assertTrue(ctf_places.may_play(FakeMember(FakeRole(name)), self.ctf, STAFF))
 
     def test_others_may_not(self):
         other_ctf_role = FakeRole("⚡ Bar CTF")
 
-        self.assertFalse(ctf_categories.may_add(FakeMember(FakeRole("sv{member}"), other_ctf_role), self.ctf, STAFF))
+        self.assertFalse(ctf_places.may_play(FakeMember(FakeRole("sv{member}"), other_ctf_role), self.ctf, STAFF))
 
 
 class AddCategoriesTest(unittest.IsolatedAsyncioTestCase):

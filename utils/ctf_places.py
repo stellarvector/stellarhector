@@ -1,7 +1,13 @@
 from dataclasses import dataclass
 from enum import Enum
 
+import discord
+
 from utils import ctfs
+
+
+# The reply to a command that would change a locked CTF: it is read-only, and its archive is made already
+LOCKED = "This CTF is locked: it is read-only now, nothing can be added or changed."
 
 
 class Place(Enum):
@@ -48,6 +54,26 @@ def locate(channel):
 def without_bot_channel(ctf, channels):
     """The channels, except the CTF's #bot: that is staff only, not CTF content."""
     return [channel for channel in channels if channel.id != ctf.bot_channel_id]
+
+
+def may_play(member, ctf, staff_roles):
+    """Whether the member takes part in the CTF, so may add categories and challenges to it: its players (with the CTF
+    role) and staff do."""
+    return any(role.id == ctf.role_id or role.name in staff_roles for role in member.roles)
+
+
+async def update_category_overwrites(ctf, category, changes):
+    """Set the permissions in changes, per role a dict of permission name to True, False or None, on the overwrites of
+    the CTF's category, keeping everything else, and sync every channel in it but #bot to it."""
+    overwrites = dict(category.overwrites)
+    for role, permissions in changes.items():
+        overwrite = discord.PermissionOverwrite(**dict(overwrites.get(role, discord.PermissionOverwrite())))
+        overwrite.update(**permissions)
+        overwrites[role] = overwrite
+    await category.edit(overwrites=overwrites)
+
+    for channel in without_bot_channel(ctf, category.channels):
+        await channel.edit(sync_permissions=True)
 
 
 def wrong_place(location, *allowed):

@@ -19,6 +19,8 @@ TRUSTED_PLAYER_ROLES = config_helpers.role_names(config, "CORE_PLAYER_ROLE", "KN
 PLAYER_ROLE = config_helpers.role_name(config, "PLAYER_ROLE")
 # What Accept + known player on an approval card gives
 KNOWN_PLAYER_ROLE = config_helpers.role_name(config, "KNOWN_PLAYER_ROLE")
+# Every member of the team: a released CTF is opened to it
+MEMBER_ROLE = config_helpers.role_name(config, "MEMBER_ROLE")
 
 # Server-wide channels; a feature whose channel is None is switched off
 FEATURE_CHANNELS = [

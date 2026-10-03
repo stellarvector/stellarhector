@@ -287,6 +287,45 @@ class ArchiveTest(unittest.IsolatedAsyncioTestCase):
 
         self.assertIsNone(ctfs.get(self.ctf.id).archived_at)
 
+    async def test_a_failing_save_leaves_nothing_behind_so_a_new_try_starts_afresh(self):
+        index = (self.archive_path / "index.html").read_text()
+        self.git.save_error = RuntimeError("push rejected")
+        with self.assertRaises(RuntimeError):
+            await ctf_archive.archive(self.guild, self.ctf, NOW)
+
+        self.assertEqual(list(self.archive_path.glob("*/Foo CTF*")), [])
+        self.assertEqual((self.archive_path / "index.html").read_text(), index)
+
+        self.git.save_error = None
+        await ctf_archive.archive(self.guild, self.ctf, NOW)
+
+        self.assertIn("web/sqli.html", self.pages())
+        year_index = next(self.archive_path.glob("*/index.html")).read_text()
+        self.assertEqual(year_index.count('href="./Foo CTF/'), 1)
+
+    async def test_a_failing_download_leaves_the_year_index_as_it_was(self):
+        year = self.archive_path / str(datetime.now().year)
+        year.mkdir()
+        (year / "index.html").write_text("<ul><!--add-ctf--></ul>")
+        self.web.messages[0].attachments = [SimpleNamespace(id=7, filename="chall.zip",
+                                                            url="https://example.com/chall.zip")]
+
+        with mock.patch("utils.archive.message.urlretrieve", side_effect=OSError("expired")):
+            with self.assertRaisesRegex(OSError, "expired"):
+                await ctf_archive.archive(self.guild, self.ctf, NOW)
+
+        self.assertEqual(list(year.glob("Foo CTF*")), [])
+        self.assertEqual((year / "index.html").read_text(), "<ul><!--add-ctf--></ul>")
+        self.assertEqual(self.git.calls, ["sync"])
+        self.assertIsNone(ctfs.get(self.ctf.id).archived_at)
+
+    async def test_without_its_category_only_the_main_channel_is_archived(self):
+        self.guild.channels.remove(self.category)
+
+        await ctf_archive.archive(self.guild, self.ctf, NOW)
+
+        self.assertEqual(set(self.pages()), {"foo-ctf.html"})
+
 
 if __name__ == "__main__":
     unittest.main()
