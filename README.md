@@ -20,7 +20,7 @@ All settings live in `.env`; see `.env.example` for the full list.
 Role names (not IDs), as they appear on the server:
 
 - `ADMIN_ROLE`: admins (e.g. `sv{admin}`).
-- `MANAGER_ROLE`: managers (e.g. `sv{manager}`), may run the CTF management commands (create, release, archive and remove CTFs, add and remove players, unsolve challenges, archive channels).
+- `MANAGER_ROLE`: managers (e.g. `sv{manager}`), may run the CTF management commands (create, release, archive and remove CTFs, add and remove players, unsolve challenges, archive channels, post the CTFtime table).
 - `MODERATOR_ROLE`: moderators (e.g. `sv{moderator}`).
 - `CORE_PLAYER_ROLE`, `KNOWN_PLAYER_ROLE`, `PLAYER_ROLE`: the player tiers.
 - `MEMBER_ROLE`: every member of the team.
@@ -74,3 +74,9 @@ If a job raises or runs longer than its timeout (4 minutes by default; a job may
 - `parse_ctftime_id(text)` returns the id from the first `ctftime.org/event/<id>` link in a text, or `None`.
 
 Network errors, timeouts, error responses other than a 404 on an event, and responses that are not the expected JSON raise `CtftimeError`. `list_events` relies on CTFtime sorting events by start (checked against the live API).
+
+### `/ctftime-table [start-month] [months]`
+
+Admins and managers can run it in any channel; it always posts in `CTF_SELECTION_CHANNEL_ID`. It lists every CTF on CTFtime starting in `months` months (default 2) from `start-month` (default next month; a month number such as `11` means the next time that month comes around, `2026-11` is that exact month). The first month is marked (validate), the later ones (preview). Each CTF is one line of fixed-width columns (dates in `TIMEZONE`, name, format, weight, online/onsite) in inline code, followed by a CTFtime link without a preview. Messages are split between lines to stay under Discord's 2000 characters.
+
+The lines are built by `utils/ctftime_table.py`; `post_table` posts it, so the monthly post can call the same code.

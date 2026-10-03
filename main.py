@@ -22,7 +22,8 @@ LOAD_COMMANDS = [
     "unsolve",
     "archive_ctf",
     "archive_channel",
-    "release_ctf"
+    "release_ctf",
+    "ctftime_table",
 ]
 
 
