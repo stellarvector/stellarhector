@@ -34,7 +34,7 @@ Channel IDs (right-click the channel with developer mode on, then "Copy Channel 
 - `ADMIN_CHANNEL_ID`: shared admin channel for all bot alerts (feed failures, CTFtime changes before a CTF is set up, removal reminders).
 - `CTF_SELECTION_CHANNEL_ID`: #ctf-selection.
 - `UPCOMING_CTFS_CHANNEL_ID`: #upcoming-ctfs.
-- `CALENDAR_CHANNEL_ID`: calendar announcements.
+- `CALENDAR_CHANNEL_ID`: calendar announcements (see [Calendar sync](#calendar-sync)).
 - `LEARNING_FORUM_ID`: the #learning forum, where new blog posts are shared.
 
 Features read these with `bot.channel_id("ADMIN_CHANNEL_ID")`, which returns `None` when the ID is not set.
@@ -84,3 +84,22 @@ The lines are built by `utils/ctftime_table.py`; `post_table` posts it, so the m
 ### Monthly post
 
 On the 1st of every month at 10:00 `TIMEZONE`, the `monthly-ctftime-table` job posts what `/ctftime-table` posts with its defaults (next month to validate, the month after as a preview). If CTFtime can't be reached it is retried every tick, and after a day of failing one alert is posted in `ADMIN_CHANNEL_ID`. If Discord refuses a message, the table may be half posted, so it is not retried: an alert is posted in `ADMIN_CHANNEL_ID` straight away to run `/ctftime-table` by hand. Nothing is posted when `CTF_SELECTION_CHANNEL_ID` is not set.
+
+## Calendar sync
+
+With `ICS_URL` set, the `calendar-sync` job downloads the calendar every `ICS_POLL_MINUTES` and mirrors its events into the server's Discord scheduled events. Without `ICS_URL` the feature is off entirely.
+
+- `ICS_URL`: the ICS feed of the calendar.
+- `ICS_POLL_MINUTES`: minutes between syncs (default `15`; the scheduler ticks every 5 minutes, so it is rounded up to a tick).
+- `ICS_LOOKAHEAD_DAYS`: events running now or starting within this many days are created (default `30`).
+- `ICS_PING_ROLE`: name of the role to mention in announcements (default: nobody is pinged).
+
+Each event in scope becomes an external Discord event: the title, the description cut to Discord's 1000 characters (followed by the event's URL if it fits) and the location (the ICS `LOCATION`, else its `URL`, else "See description"). Times without a timezone in the feed are read in `TIMEZONE`. An event that is already running starts a minute from now in Discord, since Discord refuses events that start in the past. Every new event is announced in `CALENDAR_CHANNEL_ID` with an embed (title, start and end, location, the start of the description and a link to the event); when that channel is not set, events are created without an announcement.
+
+Only single, timed events are synced for now: recurring and all-day events are skipped, as are cancelled events (`STATUS:CANCELLED`), events without an end and events with values the bot can't read (logged as a warning). The sync only creates events; changes and cancellations in the calendar are not mirrored yet.
+
+The bot keeps the occurrence (ICS `UID` + start) → Discord event and announcement in the `calendar_occurrences` table, so it never creates an event twice, also after a restart, and it only ever touches the events it created itself. If the feed can't be downloaded or parsed, nothing changes and the job is retried on the next tick. An event Discord refuses is logged and tried again on the next sync.
+
+The bot needs the **Create Events** and **Manage Events** permissions on the server, and permission to send messages and embeds in `CALENDAR_CHANNEL_ID`.
+
+The sync itself is `run_calendar_sync()` in `command_handlers/calendar_sync.py`; it returns a summary of what it created, updated and cancelled (for now only creating happens). The ICS parsing, the planning of what to create and the announcement are pure functions in `utils/calendar_sync.py`.

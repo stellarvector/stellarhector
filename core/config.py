@@ -26,6 +26,20 @@ def channel_id(config, key):
     return int(value)
 
 
+def positive_int(config, key, default):
+    """The whole number above zero behind the key, or default when it is unset or anything else."""
+    value = (config.get(key) or "").strip()
+
+    if not value:
+        return default
+
+    if not value.isdigit() or int(value) == 0:
+        logging.getLogger("bot").warning(f"{key} {value!r} must be a whole number above 0, using {default}")
+        return default
+
+    return int(value)
+
+
 def timezone(config):
     value = (config.get("TIMEZONE") or "").strip()
 

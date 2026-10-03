@@ -65,3 +65,17 @@ class WatchdogLimitTest(unittest.TestCase):
     def test_not_longer_than_a_tick_falls_back_to_default(self):
         with self.assertLogs("bot", level="WARNING"):
             self.assertEqual(self.limit({"WATCHDOG_TIMEOUT_MINUTES": "5"}), self.DEFAULT)
+
+
+class PositiveIntTest(unittest.TestCase):
+    def test_defaults_when_unset(self):
+        self.assertEqual(config.positive_int({}, "ICS_POLL_MINUTES", 15), 15)
+        self.assertEqual(config.positive_int({"ICS_POLL_MINUTES": " "}, "ICS_POLL_MINUTES", 15), 15)
+
+    def test_uses_configured_number(self):
+        self.assertEqual(config.positive_int({"ICS_POLL_MINUTES": "30"}, "ICS_POLL_MINUTES", 15), 30)
+
+    def test_invalid_or_zero_falls_back_to_default(self):
+        for value in ["fifteen", "0", "-5", "1.5"]:
+            with self.subTest(value=value), self.assertLogs("bot", level="WARNING"):
+                self.assertEqual(config.positive_int({"ICS_POLL_MINUTES": value}, "ICS_POLL_MINUTES", 15), 15)
