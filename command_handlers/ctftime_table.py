@@ -1,11 +1,13 @@
 # Posts the upcoming CTFs from CTFtime in #ctf-selection
 # Can be run from any channel
 #   by an administrator or manager
+# Also posted by itself on the 1st of every month, with the defaults
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
 import core.bot as bot
+import core.scheduler as scheduler
 import discord
 from discord import app_commands
 from error_handlers.permissions import check_role_error
@@ -14,6 +16,24 @@ from utils import ctftime_table
 from utils.ctftime import CtftimeError
 
 DEFAULT_MONTHS = 2
+
+
+async def post_monthly_table():
+    """Post what /ctftime-table posts with its defaults. Raises CtftimeError so the scheduler retries."""
+    channel_id = bot.channel_id("CTF_SELECTION_CHANNEL_ID")
+    if channel_id is None:
+        return
+
+    start = ctftime_table.parse_start_month(None, _today())
+    await ctftime_table.post_table(await _channel(channel_id), start, DEFAULT_MONTHS, bot.TIMEZONE)
+
+
+scheduler.register(scheduler.Job(
+    "monthly-ctftime-table",
+    scheduler.monthly_on(1, "10:00", bot.TIMEZONE),
+    post_monthly_table,
+    alert_after=timedelta(days=1),
+))
 
 
 @bot.client.tree.command(name="ctftime-table", description="Post the upcoming CTFs from CTFtime in #ctf-selection", guild=bot.guild)
@@ -30,14 +50,14 @@ async def ctftime_table_command(interaction: discord.Interaction, start_month: s
         return
 
     try:
-        start = ctftime_table.parse_start_month(start_month, datetime.now(ZoneInfo(bot.TIMEZONE)).date())
+        start = ctftime_table.parse_start_month(start_month, _today())
     except ValueError as e:
         await interaction.response.send_message(content=f":warning: {e}", ephemeral=True)
         return
 
     await interaction.response.defer(thinking=True, ephemeral=True)
 
-    channel = bot.client.get_channel(channel_id) or await bot.client.fetch_channel(channel_id)
+    channel = await _channel(channel_id)
     try:
         count = await ctftime_table.post_table(channel, start, months, bot.TIMEZONE)
     except CtftimeError as e:
@@ -53,3 +73,11 @@ async def error_on_ctftime_table_command(interaction, error):
         return
 
     await default_error_handler(interaction, error)
+
+
+def _today():
+    return datetime.now(ZoneInfo(bot.TIMEZONE)).date()
+
+
+async def _channel(channel_id):
+    return bot.client.get_channel(channel_id) or await bot.client.fetch_channel(channel_id)

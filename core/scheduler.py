@@ -23,32 +23,46 @@ DEFAULT_TIMEOUT = timedelta(minutes=4)
 DEFAULT_WATCHDOG_LIMIT = timedelta(minutes=20)
 # While a job runs the runner keeps beating this often, so a job may get a timeout longer than the watchdog limit
 JOB_BEAT_INTERVAL = timedelta(minutes=1)
+ALERT_TIMEOUT = timedelta(seconds=30)
+ALERT_ERROR_LENGTH = 500
+
+
+async def _log_alert(message):
+    logging.getLogger("bot").warning(f"No alert channel set up, alert not posted: {message}")
+
 
 _jobs = []
 _watchdog_limit = DEFAULT_WATCHDOG_LIMIT
+_alert = _log_alert
 _tick_loop = None
 
 
 @dataclass
 class Job:
-    """When to run is decided by is_due; run should be a plain action that a slash command can call too."""
+    """When to run is decided by is_due; run should be a plain action that a slash command can call too.
+
+    With alert_after set, one alert is posted once the job has kept failing for that long.
+    """
     name: str
     is_due: Callable[[datetime, Optional[datetime]], bool]
     run: Callable[[], Awaitable[None]]
     timeout: timedelta = DEFAULT_TIMEOUT
+    alert_after: Optional[timedelta] = None
 
 
 def register(job):
     _jobs.append(job)
 
 
-def init(watchdog_limit=DEFAULT_WATCHDOG_LIMIT):
-    global _watchdog_limit
+def init(watchdog_limit=DEFAULT_WATCHDOG_LIMIT, alert=_log_alert):
+    """alert is an async function posting a message for the admins, used for jobs that keep failing."""
+    global _watchdog_limit, _alert
 
     # Ticks are TICK_INTERVAL apart, so a shorter limit would kill a healthy bot
     if watchdog_limit <= TICK_INTERVAL:
         raise ValueError(f"Watchdog limit {watchdog_limit} must be longer than the tick interval {TICK_INTERVAL}")
     _watchdog_limit = watchdog_limit
+    _alert = alert
 
 
 def start():
@@ -58,16 +72,18 @@ def start():
     if _tick_loop is None:
         watchdog = Watchdog(_watchdog_limit)
         watchdog.start()
-        _tick_loop = TickLoop(_jobs, watchdog)
+        _tick_loop = TickLoop(_jobs, watchdog, alert=_alert)
     _tick_loop.start()
 
 
-async def run_due_jobs(jobs, now, heartbeat=lambda: None):
-    """Run every due job once. A job that fails or times out is logged and retried next tick."""
+async def run_due_jobs(jobs, now, heartbeat=lambda: None, alert=_log_alert):
+    """Run every due job once. A job that fails or times out is logged and retried next tick,
+    and alerted once when it has failed for its alert_after."""
     for job in jobs:
         # Beat per job, not per tick: the jobs of one tick together may run longer than the watchdog limit
         heartbeat()
-        last_run_at = _last_run_at(job.name)
+        state = _job_state(job.name)
+        last_run_at = state["last_run_at"]
         if not job.is_due(now, last_run_at):
             if last_run_at is None:
                 # First time we see this job: remember it so a daily/monthly job runs from its next slot on
@@ -76,11 +92,33 @@ async def run_due_jobs(jobs, now, heartbeat=lambda: None):
 
         try:
             await _beating_during(asyncio.wait_for(job.run(), timeout=job.timeout.total_seconds()), job.timeout, heartbeat)
-        except Exception:
+        except Exception as error:
             logging.getLogger("bot").exception(f"Scheduled job {job.name} failed (timeout {job.timeout})")
+            await _record_failure(job, state, now, error, alert)
             continue
 
         _set_last_run_at(job.name, now)
+
+
+async def _record_failure(job, state, now, error, alert):
+    failing_since = state["failing_since"] or now
+    if state["failing_since"] is None:
+        _set_failing_since(job.name, now)
+
+    if job.alert_after is None or state["alerted"] or now - failing_since < job.alert_after:
+        return
+
+    # Error texts can be long or hold backticks, keep the message well under Discord's limit
+    error_text = f"{type(error).__name__}: {error}".replace("`", "'")[:ALERT_ERROR_LENGTH]
+    message = (f":warning: Scheduled job `{job.name}` has been failing since <t:{int(failing_since.timestamp())}:f>"
+               f" and is retried every tick. Last error: `{error_text}`")
+    try:
+        await asyncio.wait_for(alert(message), timeout=ALERT_TIMEOUT.total_seconds())
+    except Exception:
+        # Not marked as alerted, so the next failing tick tries again
+        logging.getLogger("bot").exception(f"Could not post the alert for scheduled job {job.name}")
+        return
+    _set_alerted(job.name)
 
 
 async def _beating_during(awaitable, timeout, heartbeat):
@@ -102,21 +140,44 @@ async def _beating_during(awaitable, timeout, heartbeat):
         beating.cancel()
 
 
-def _last_run_at(name):
+def _job_state(name):
     with db.transaction() as conn:
-        row = conn.execute("SELECT last_run_at FROM job_runs WHERE name = ?", (name,)).fetchone()
-    if row is None or row["last_run_at"] is None:
-        return None
-    return datetime.fromisoformat(row["last_run_at"])
+        row = conn.execute("SELECT last_run_at, failing_since, alerted FROM job_runs WHERE name = ?", (name,)).fetchone()
+    if row is None:
+        return {"last_run_at": None, "failing_since": None, "alerted": False}
+    return {
+        "last_run_at": _parse_time(row["last_run_at"]),
+        "failing_since": _parse_time(row["failing_since"]),
+        "alerted": bool(row["alerted"]),
+    }
+
+
+def _parse_time(value):
+    return None if value is None else datetime.fromisoformat(value)
 
 
 def _set_last_run_at(name, when):
+    # A successful run ends the failure period
     with db.transaction() as conn:
         conn.execute(
             "INSERT INTO job_runs (name, last_run_at) VALUES (?, ?) "
-            "ON CONFLICT (name) DO UPDATE SET last_run_at = excluded.last_run_at",
+            "ON CONFLICT (name) DO UPDATE SET last_run_at = excluded.last_run_at, failing_since = NULL, alerted = 0",
             (name, when.astimezone(timezone.utc).isoformat()),
         )
+
+
+def _set_failing_since(name, when):
+    with db.transaction() as conn:
+        conn.execute(
+            "INSERT INTO job_runs (name, failing_since) VALUES (?, ?) "
+            "ON CONFLICT (name) DO UPDATE SET failing_since = excluded.failing_since",
+            (name, when.astimezone(timezone.utc).isoformat()),
+        )
+
+
+def _set_alerted(name):
+    with db.transaction() as conn:
+        conn.execute("UPDATE job_runs SET alerted = 1 WHERE name = ?", (name,))
 
 
 def every_minutes(minutes):
@@ -210,8 +271,9 @@ class Watchdog:
 class TickLoop:
     """Wakes up every interval and runs the jobs that are due."""
 
-    def __init__(self, jobs, watchdog, interval=TICK_INTERVAL, restart_delay=None):
+    def __init__(self, jobs, watchdog, interval=TICK_INTERVAL, restart_delay=None, alert=_log_alert):
         self.jobs = jobs
+        self.alert = alert
         self.restart_delay = interval if restart_delay is None else restart_delay
         self.watchdog = watchdog
         self._loop = tasks.loop(seconds=interval.total_seconds())(self._tick)
@@ -241,4 +303,4 @@ class TickLoop:
 
     async def _tick(self):
         self.watchdog.beat()
-        await run_due_jobs(self.jobs, datetime.now(timezone.utc), heartbeat=self.watchdog.beat)
+        await run_due_jobs(self.jobs, datetime.now(timezone.utc), heartbeat=self.watchdog.beat, alert=self.alert)

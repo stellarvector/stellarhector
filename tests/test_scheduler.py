@@ -256,6 +256,112 @@ class RunDueJobsTest(unittest.IsolatedAsyncioTestCase):
         self.assertLessEqual(len(beats), 3)  # before the job, then at most timeout / interval
 
 
+class FailureAlertTest(unittest.IsolatedAsyncioTestCase):
+    def setUp(self):
+        self.db_path = use_temporary_database(self)
+        self.alerts = []
+        self.fail = True
+
+    async def alert(self, message):
+        self.alerts.append(message)
+
+    def job(self, alert_after=timedelta(days=1)):
+        async def run():
+            if self.fail:
+                raise RuntimeError("CTFtime is down")
+
+        return scheduler.Job("flaky", always_due, run, alert_after=alert_after)
+
+    async def tick(self, jobs, now):
+        if not self.fail:
+            await scheduler.run_due_jobs(jobs, now, alert=self.alert)
+            return
+        with self.assertLogs("bot", level="ERROR"):
+            await scheduler.run_due_jobs(jobs, now, alert=self.alert)
+
+    async def test_alerts_once_after_failing_for_the_alert_time(self):
+        jobs = [self.job()]
+        start = utc(2026, 11, 1, 9, 0)
+
+        await self.tick(jobs, start)
+        await self.tick(jobs, start + timedelta(hours=23, minutes=55))
+        self.assertEqual(self.alerts, [])
+
+        await self.tick(jobs, start + timedelta(days=1))
+        await self.tick(jobs, start + timedelta(days=1, minutes=5))
+        await self.tick(jobs, start + timedelta(days=3))
+
+        self.assertEqual(len(self.alerts), 1)
+        self.assertIn("flaky", self.alerts[0])
+        self.assertIn("CTFtime is down", self.alerts[0])
+
+    async def test_failing_since_survives_a_restart(self):
+        jobs = [self.job()]
+        start = utc(2026, 11, 1, 9, 0)
+        await self.tick(jobs, start)
+
+        db.close()
+        db.init(self.db_path)
+        await self.tick(jobs, start + timedelta(days=1))
+
+        self.assertEqual(len(self.alerts), 1)
+
+    async def test_success_starts_a_new_failure_period(self):
+        jobs = [self.job()]
+        start = utc(2026, 11, 1, 9, 0)
+        await self.tick(jobs, start)
+        await self.tick(jobs, start + timedelta(days=1))
+
+        self.fail = False
+        await self.tick(jobs, start + timedelta(days=1, minutes=5))
+        self.fail = True
+        await self.tick(jobs, start + timedelta(days=2))
+        self.assertEqual(len(self.alerts), 1)
+
+        await self.tick(jobs, start + timedelta(days=3))
+        self.assertEqual(len(self.alerts), 2)
+
+    async def test_long_error_with_backticks_stays_one_code_span(self):
+        async def run():
+            raise RuntimeError("`" * 5000)
+
+        jobs = [scheduler.Job("flaky", always_due, run, alert_after=timedelta(days=1))]
+        start = utc(2026, 11, 1, 9, 0)
+        await self.tick(jobs, start)
+        await self.tick(jobs, start + timedelta(days=1))
+
+        self.assertLess(len(self.alerts[0]), 2000)
+        self.assertEqual(self.alerts[0].count("`"), 4)
+
+    async def test_job_without_alert_time_never_alerts(self):
+        jobs = [self.job(alert_after=None)]
+        start = utc(2026, 11, 1, 9, 0)
+
+        await self.tick(jobs, start)
+        await self.tick(jobs, start + timedelta(days=7))
+
+        self.assertEqual(self.alerts, [])
+
+    async def test_alert_that_fails_is_tried_again_next_tick(self):
+        jobs = [self.job()]
+        start = utc(2026, 11, 1, 9, 0)
+        attempts = []
+
+        async def broken_then_working_alert(message):
+            attempts.append(message)
+            if len(attempts) == 1:
+                raise RuntimeError("Discord is down too")
+
+        with self.assertLogs("bot", level="ERROR") as logs:
+            await scheduler.run_due_jobs(jobs, start, alert=broken_then_working_alert)
+            await scheduler.run_due_jobs(jobs, start + timedelta(days=1), alert=broken_then_working_alert)
+            await scheduler.run_due_jobs(jobs, start + timedelta(days=1, minutes=5), alert=broken_then_working_alert)
+            await scheduler.run_due_jobs(jobs, start + timedelta(days=1, minutes=10), alert=broken_then_working_alert)
+
+        self.assertEqual(len(attempts), 2)
+        self.assertIn("Discord is down too", "\n".join(logs.output))
+
+
 class FakeClock:
     def __init__(self):
         self.now = 1000.0

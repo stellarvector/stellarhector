@@ -48,7 +48,8 @@ if __name__ == "__main__":
 
     try:
         db.init(bot.config.get("DATABASE_PATH") or db.DEFAULT_PATH)
-        scheduler.init(config_helpers.watchdog_limit(bot.config, scheduler.DEFAULT_WATCHDOG_LIMIT, scheduler.TICK_INTERVAL))
+        scheduler.init(config_helpers.watchdog_limit(bot.config, scheduler.DEFAULT_WATCHDOG_LIMIT, scheduler.TICK_INTERVAL),
+                       alert=bot.alert_admins)
         for key in bot.FEATURE_CHANNELS:
             if bot.channel_id(key) is None:
                 logger.warning(f"{key} is not configured, the feature using it is switched off")
