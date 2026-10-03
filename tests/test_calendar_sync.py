@@ -5,7 +5,7 @@ from zoneinfo import ZoneInfo
 import discord
 
 from utils import calendar_sync
-from utils.calendar_sync import Create, Occurrence
+from utils.calendar_sync import Create, EventDetails, Occurrence, Recreate, Update
 
 NOW = datetime(2026, 10, 3, 12, 0, tzinfo=timezone.utc)
 WINDOW = timedelta(days=30)
@@ -21,8 +21,14 @@ def occurrence(uid="meeting-1", start=utc(2026, 10, 10, 18), end=utc(2026, 10, 1
                       slot=slot)
 
 
-def plan(occurrences, known=(), now=NOW):
-    return calendar_sync.plan(occurrences, set(known), now, WINDOW)
+def event(name="Weekly meeting", description="", location="See description", start=utc(2026, 10, 10, 18),
+          end=utc(2026, 10, 10, 20)):
+    """The Discord event the bot has for an occurrence."""
+    return EventDetails(name=name, description=description, location=location, start=start, end=end)
+
+
+def plan(occurrences, known=None, now=NOW):
+    return calendar_sync.plan(occurrences, known or {}, now, WINDOW)
 
 
 class PlanTest(unittest.TestCase):
@@ -74,17 +80,19 @@ class PlanTest(unittest.TestCase):
     def test_occurrence_already_created_is_not_created_again(self):
         meeting = occurrence()
 
-        self.assertEqual(plan([meeting], known=[("meeting-1", "2026-10-10T18:00:00+00:00")]), [])
+        self.assertEqual(plan([meeting], known={("meeting-1", ""): event()}), [])
 
-    def test_same_start_in_another_timezone_is_the_same_occurrence(self):
-        meeting = occurrence(start=datetime(2026, 10, 10, 20, tzinfo=ZoneInfo("Europe/Brussels")))
+    def test_same_slot_in_another_timezone_is_the_same_occurrence(self):
+        slot = datetime(2026, 10, 10, 20, tzinfo=ZoneInfo("Europe/Brussels"))
+        meeting = occurrence(uid="series", start=slot, slot=slot)
 
-        self.assertEqual(plan([meeting], known=[("meeting-1", "2026-10-10T18:00:00+00:00")]), [])
+        self.assertEqual(plan([meeting], known={("series", "2026-10-10T18:00:00+00:00"): event()}), [])
 
-    def test_other_occurrence_of_a_known_uid_is_created(self):
-        next_week = occurrence(start=utc(2026, 10, 17, 18), end=utc(2026, 10, 17, 20))
+    def test_other_occurrence_of_a_known_series_is_created(self):
+        next_week = occurrence(uid="series", start=utc(2026, 10, 17, 18), end=utc(2026, 10, 17, 20),
+                               slot=utc(2026, 10, 17, 18))
 
-        actions = plan([next_week], known=[("meeting-1", "2026-10-10T18:00:00+00:00")])
+        actions = plan([next_week], known={("series", "2026-10-10T18:00:00+00:00"): event()})
 
         self.assertEqual([action.occurrence for action in actions], [next_week])
 
@@ -102,6 +110,86 @@ class PlanTest(unittest.TestCase):
         ending = occurrence(start=NOW - timedelta(hours=1), end=NOW + timedelta(seconds=30))
 
         self.assertEqual(plan([ending]), [])
+
+
+class MirrorTest(unittest.TestCase):
+    def test_changed_title_updates_the_event(self):
+        renamed = occurrence(title="Monthly meeting")
+
+        actions = plan([renamed], known={("meeting-1", ""): event()})
+
+        self.assertEqual(actions, [Update(renamed, event(name="Monthly meeting"))])
+
+    def test_changed_time_description_and_location_update_the_event(self):
+        changed = occurrence(start=utc(2026, 10, 10, 19), end=utc(2026, 10, 10, 21), description="Bring snacks",
+                             location="Room 2")
+
+        actions = plan([changed], known={("meeting-1", ""): event()})
+
+        self.assertEqual(actions, [Update(changed, event(start=utc(2026, 10, 10, 19), end=utc(2026, 10, 10, 21),
+                                                         description="Bring snacks", location="Room 2"))])
+
+    def test_event_edited_in_discord_is_set_back_to_the_calendar(self):
+        meeting = occurrence()
+
+        actions = plan([meeting], known={("meeting-1", ""): event(name="Edited by hand", location="Somewhere")})
+
+        self.assertEqual(actions, [Update(meeting, event())])
+
+    def test_unchanged_occurrence_needs_no_action(self):
+        self.assertEqual(plan([occurrence()], known={("meeting-1", ""): event()}), [])
+
+    def test_known_occurrence_moved_beyond_the_window_is_updated(self):
+        later = occurrence(start=NOW + WINDOW + timedelta(days=5), end=NOW + WINDOW + timedelta(days=5, hours=2))
+
+        actions = plan([later], known={("meeting-1", ""): event()})
+
+        self.assertEqual(actions, [Update(later, event(start=later.start, end=later.end))])
+
+    def test_event_deleted_in_discord_is_recreated(self):
+        meeting = occurrence()
+
+        self.assertEqual(plan([meeting], known={("meeting-1", ""): None}), [Recreate(meeting, event())])
+
+    def test_event_deleted_in_discord_beyond_the_window_is_recreated(self):
+        later = occurrence(start=NOW + WINDOW + timedelta(days=5), end=NOW + WINDOW + timedelta(days=5, hours=2))
+
+        actions = plan([later], known={("meeting-1", ""): None})
+
+        self.assertEqual(actions, [Recreate(later, event(start=later.start, end=later.end))])
+
+    def test_running_event_deleted_in_discord_is_recreated_starting_in_a_minute(self):
+        running = occurrence(start=NOW - timedelta(hours=1), end=NOW + timedelta(hours=1))
+
+        actions = plan([running], known={("meeting-1", ""): None})
+
+        self.assertEqual(actions, [Recreate(running, event(start=NOW + timedelta(minutes=1), end=NOW + timedelta(hours=1)))])
+
+    def test_running_event_that_started_in_discord_needs_no_action(self):
+        # It was created starting a minute after the sync that saw it running, which is past by now
+        running = occurrence(start=NOW - timedelta(hours=1), end=NOW + timedelta(hours=1))
+        in_discord = event(start=NOW - timedelta(minutes=10), end=NOW + timedelta(hours=1))
+
+        self.assertEqual(plan([running], known={("meeting-1", ""): in_discord}), [])
+
+    def test_running_event_still_starting_in_a_minute_needs_no_action(self):
+        # Created by the sync a few seconds ago, at that sync's now + 1 minute
+        running = occurrence(start=NOW - timedelta(hours=1), end=NOW + timedelta(hours=1))
+        in_discord = event(start=NOW + timedelta(seconds=40), end=NOW + timedelta(hours=1))
+
+        self.assertEqual(plan([running], known={("meeting-1", ""): in_discord}), [])
+
+    def test_event_moved_into_the_past_in_the_calendar_starts_in_a_minute(self):
+        running = occurrence(start=NOW - timedelta(hours=1), end=NOW + timedelta(hours=1))
+
+        actions = plan([running], known={("meeting-1", ""): event(end=NOW + timedelta(hours=1))})
+
+        self.assertEqual(actions, [Update(running, event(start=NOW + timedelta(minutes=1), end=NOW + timedelta(hours=1)))])
+
+    def test_finished_known_occurrence_needs_no_action(self):
+        past = occurrence(start=NOW - timedelta(hours=3), end=NOW - timedelta(hours=1))
+
+        self.assertEqual(plan([past], known={("meeting-1", ""): None}), [])
 
 
 def details(meeting):
@@ -245,8 +333,8 @@ def feed(*events):
     return ("\r\n".join(lines) + "\r\n").encode()
 
 
-def parse(*events, now=NOW):
-    return calendar_sync.parse_occurrences(feed(*events), "Europe/Brussels", now, WINDOW)
+def parse(*events, now=NOW, known=()):
+    return calendar_sync.parse_occurrences(feed(*events), "Europe/Brussels", now, WINDOW, set(known))
 
 
 def brussels(*args):
@@ -340,6 +428,21 @@ SUMMARY:Weekly meeting
 
         self.assertEqual([occurrence.uid for occurrence in occurrences], ["meeting-1"])
 
+    def test_known_event_moved_beyond_the_window_is_parsed(self):
+        occurrences = parse("UID:meeting-1\nDTSTART:20270101T180000Z\nDURATION:PT2H", known=[("meeting-1", "")])
+
+        self.assertEqual(occurrences, [occurrence(start=utc(2027, 1, 1, 18), end=utc(2027, 1, 1, 20), title="")])
+
+    def test_known_event_gone_from_the_feed_is_not_parsed(self):
+        occurrences = parse("UID:meeting-2\nDTSTART:20261010T180000Z\nDTEND:20261010T200000Z", known=[("meeting-1", "")])
+
+        self.assertEqual([occurrence.uid for occurrence in occurrences], ["meeting-2"])
+
+    def test_known_event_moved_into_the_window_is_parsed_once(self):
+        occurrences = parse("UID:meeting-1\nDTSTART:20261010T180000Z\nDTEND:20261010T200000Z", known=[("meeting-1", "")])
+
+        self.assertEqual(occurrences, [occurrence(title="")])
+
     def test_running_event_is_parsed(self):
         occurrences = parse("UID:running\nDTSTART:20261002T180000Z\nDTEND:20261004T200000Z")
 
@@ -362,7 +465,7 @@ class RecurringTest(unittest.TestCase):
 
     def test_window_rolling_forward_creates_only_the_next_occurrence(self):
         first_sync = plan(parse(WEEKLY))
-        known = {action.occurrence.key for action in first_sync}
+        known = {action.occurrence.key: action.details for action in first_sync}
         week_later = NOW + timedelta(days=7)
 
         actions = plan(parse(WEEKLY, now=week_later), known=known, now=week_later)
@@ -398,6 +501,15 @@ class RecurringTest(unittest.TestCase):
         self.assertEqual((moved[0].start, moved[0].end, moved[0].location),
                          (utc(2026, 10, 17, 19), utc(2026, 10, 17, 21, 30), "Room 2"))
 
+    def test_one_off_event_is_known_by_its_uid_alone(self):
+        # So moving it in the calendar keeps it the same occurrence
+        occurrences = parse("UID:meeting-1\nDTSTART:20261010T180000Z\nDTEND:20261010T200000Z")
+
+        self.assertEqual(occurrences[0].key, ("meeting-1", ""))
+
+    def test_occurrence_of_a_series_is_known_by_its_slot(self):
+        self.assertEqual(parse(WEEKLY)[0].key, ("series", "2026-10-10T18:00:00+00:00"))
+
     def test_moved_override_keeps_the_key_of_its_slot_in_the_series(self):
         # So a later change to the override is the same occurrence, not a new one
         occurrences = parse(WEEKLY, "UID:series\nRECURRENCE-ID:20261017T180000Z\nDTSTART:20261017T190000Z\n"
@@ -405,6 +517,22 @@ class RecurringTest(unittest.TestCase):
 
         moved = [occurrence for occurrence in occurrences if occurrence.start == utc(2026, 10, 17, 19)]
         self.assertEqual(moved[0].key, ("series", "2026-10-17T18:00:00+00:00"))
+
+    def test_known_override_moved_beyond_the_window_is_parsed(self):
+        occurrences = parse(WEEKLY, "UID:series\nRECURRENCE-ID:20261017T180000Z\nDTSTART:20261217T190000Z\n"
+                                    "DTEND:20261217T210000Z\nSUMMARY:Moved meeting",
+                            known=[("series", "2026-10-17T18:00:00+00:00")])
+
+        moved = [occurrence for occurrence in occurrences if occurrence.title == "Moved meeting"]
+        self.assertEqual([(occurrence.start, occurrence.key) for occurrence in moved],
+                         [(utc(2026, 12, 17, 19), ("series", "2026-10-17T18:00:00+00:00"))])
+
+    def test_known_override_moved_beyond_the_window_and_cancelled_is_not_parsed(self):
+        occurrences = parse(WEEKLY, "UID:series\nRECURRENCE-ID:20261017T180000Z\nDTSTART:20261217T190000Z\n"
+                                    "DTEND:20261217T210000Z\nSTATUS:CANCELLED",
+                            known=[("series", "2026-10-17T18:00:00+00:00")])
+
+        self.assertNotIn(("series", "2026-10-17T18:00:00+00:00"), [occurrence.key for occurrence in occurrences])
 
     def test_cancelled_override_is_left_out(self):
         occurrences = parse(WEEKLY, "UID:series\nRECURRENCE-ID:20261017T180000Z\nDTSTART:20261017T180000Z\n"
@@ -436,7 +564,9 @@ class RecurringTest(unittest.TestCase):
     def test_occurrence_known_by_its_slot_is_not_created_again(self):
         moved = occurrence(uid="series", start=utc(2026, 10, 17, 19), end=utc(2026, 10, 17, 21), slot=utc(2026, 10, 17, 18))
 
-        self.assertEqual(plan([moved], known=[("series", "2026-10-17T18:00:00+00:00")]), [])
+        in_discord = event(start=utc(2026, 10, 17, 19), end=utc(2026, 10, 17, 21))
+
+        self.assertEqual(plan([moved], known={("series", "2026-10-17T18:00:00+00:00"): in_discord}), [])
 
 
 class AllDayTest(unittest.TestCase):
@@ -473,6 +603,13 @@ class AllDayTest(unittest.TestCase):
         self.assertEqual([(occurrence.start, occurrence.end) for occurrence in occurrences],
                          [(brussels(2026, 10, 10), brussels(2026, 10, 10, 23, 59)),
                           (brussels(2026, 10, 17), brussels(2026, 10, 17, 23, 59))])
+
+    def test_known_all_day_override_moved_beyond_the_window_is_parsed(self):
+        occurrences = parse("UID:days\nDTSTART;VALUE=DATE:20261010\nRRULE:FREQ=WEEKLY;COUNT=2",
+                            "UID:days\nRECURRENCE-ID;VALUE=DATE:20261017\nDTSTART;VALUE=DATE:20261217",
+                            known=[("days", "2026-10-16T22:00:00+00:00")])
+
+        self.assertEqual([occurrence.start for occurrence in occurrences], [brussels(2026, 10, 10), brussels(2026, 12, 17)])
 
     def test_all_day_event_in_another_timezone(self):
         occurrences = calendar_sync.parse_occurrences(feed("UID:day\nDTSTART;VALUE=DATE:20261010"), "America/New_York", NOW, WINDOW)

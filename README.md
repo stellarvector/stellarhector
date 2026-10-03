@@ -98,10 +98,18 @@ Each event in scope becomes an external Discord event: the title, the descriptio
 
 Recurring events (`RRULE`) become one Discord event per occurrence in the window, so later occurrences are created as the window moves forward. Excluded dates (`EXDATE`) are left out, and an occurrence that was changed on its own (`RECURRENCE-ID`) gets its own time and details. All-day events run from 00:00 on their first day to 23:59 on their last day in `TIMEZONE`.
 
-Cancelled events and occurrences (`STATUS:CANCELLED`) are skipped, as are timed events without an end and events with values the bot can't read (logged as a warning). The sync only creates events; changes and cancellations in the calendar are not mirrored yet.
+Cancelled events and occurrences (`STATUS:CANCELLED`) are skipped, as are timed events without an end and events with values the bot can't read (logged as a warning). Cancellations in the calendar are not mirrored yet.
 
-The bot keeps the occurrence (ICS `UID` + start, for an occurrence of a recurring event the start it has in the series, even when it was moved) → Discord event and announcement in the `calendar_occurrences` table, so it never creates an event twice, also after a restart, and it only ever touches the events it created itself. If the feed can't be downloaded or parsed, nothing changes and the job is retried on the next tick. An event Discord refuses is logged and tried again on the next sync.
+The calendar is the source of truth: change events there, not in Discord. Once the bot created an event, every sync quietly keeps it matching the calendar, without posting a message:
+
+- A change to the time, title, description or location updates the Discord event, and the announcement is edited to show the new details. An event moved beyond the window is updated too: the window only limits which events get created.
+- An admin's edit to one of the bot's events in Discord is overwritten with the calendar's details.
+- One of the bot's events deleted in Discord is created again, and the link in its announcement is edited to point to the new event.
+
+A sync that changes nothing in the calendar makes no changes on Discord.
+
+The bot keeps the occurrence (ICS `UID`, plus for an occurrence of a recurring event the start it has in the series, even when it was moved) → Discord event and announcement in the `calendar_occurrences` table, so it never creates an event twice, also after a restart, and it only ever touches the events it created itself. Moving a one-off event or a single occurrence keeps it the same event; changing the start of a whole recurring series makes its occurrences new ones. If the feed can't be downloaded or parsed, nothing changes and the job is retried on the next tick. An event Discord refuses is logged and tried again on the next sync.
 
 The bot needs the **Create Events** and **Manage Events** permissions on the server, and permission to send messages and embeds in `CALENDAR_CHANNEL_ID`.
 
-The sync itself is `run_calendar_sync()` in `command_handlers/calendar_sync.py`; it returns a summary of what it created, updated and cancelled (for now only creating happens). The ICS parsing, the planning of what to create and the announcement are pure functions in `utils/calendar_sync.py`.
+The sync itself is `run_calendar_sync()` in `command_handlers/calendar_sync.py`; it returns a summary of what it created, updated (recreated events included) and cancelled (cancelling does not happen yet). The ICS parsing, the planning of what to create, update and recreate, and the announcement are pure functions in `utils/calendar_sync.py`.
