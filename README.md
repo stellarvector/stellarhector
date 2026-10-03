@@ -64,3 +64,13 @@ If a job raises or runs longer than its timeout (4 minutes by default, keep it b
 3. `docker-compose up -d --build`, then `docker inspect -f '{{.RestartCount}}' $(docker-compose ps -q bot)` and note the count.
 4. Wait about 7 minutes. `data/logs/debug.log` shows `No scheduler heartbeat for ...s, exiting so Docker restarts the bot`, and the restart count went up by one.
 5. Remove the job, put `WATCHDOG_TIMEOUT_MINUTES` back and rebuild.
+
+## CTFtime
+
+`utils/ctftime.py` is the shared CTFtime client:
+
+- `await get_event(id)` returns an `Event` (id, title, start, finish as UTC datetimes, format, weight, onsite, url, ctftime_url), or `None` when CTFtime answers 404.
+- `await list_events(start, finish)` returns every event starting in `[start, finish)`. CTFtime filters on an event's finish and ignores `offset`, so the client asks 30 days past `finish`, pages by moving `start` forward, and drops what starts outside the range.
+- `parse_ctftime_id(text)` returns the id from the first `ctftime.org/event/<id>` link in a text, or `None`.
+
+Network errors, timeouts, error responses other than a 404 on an event, and responses that are not the expected JSON raise `CtftimeError`. `list_events` relies on CTFtime sorting events by start (checked against the live API).
