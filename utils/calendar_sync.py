@@ -44,6 +44,9 @@ CANCELLED_MESSAGE = "❌ This event has been cancelled."
 
 DOWNLOAD_TIMEOUT = aiohttp.ClientTimeout(total=30)
 
+# Syncs skipped in a row before the admins are alerted: 2.5 hours at the default interval
+FAILURES_BEFORE_ALERT = 10
+
 
 # What the bot remembers of an occurrence it created an event for; announcement_message_id is None when not announced,
 # and end is the end the occurrence had in the calendar at the last sync
@@ -52,6 +55,11 @@ StoredOccurrence = namedtuple("StoredOccurrence", ["discord_event_id", "announce
 
 class FeedError(Exception):
     """The calendar feed could not be downloaded or is not an ICS calendar."""
+
+
+class EmptyFeed(FeedError):
+    """The calendar feed has no events while the bot manages some: more likely a hiccup of the calendar provider
+    than every event being cancelled at once."""
 
 
 @dataclass(frozen=True)
@@ -128,6 +136,33 @@ class Summary:
     cancelled: int = 0
 
 
+class FeedHealth:
+    """Counts the syncs skipped in a row because of the feed, to tell the admins once it has been broken a while.
+
+    Kept in memory only, so a restart starts counting again.
+    """
+
+    def __init__(self, alert_after=FAILURES_BEFORE_ALERT):
+        self.alert_after = alert_after
+        self.failures = 0
+        self.alerted = False
+
+    def failed(self):
+        """Count a skipped sync. Returns whether the alert is due now: it stays due until alert_posted."""
+        self.failures += 1
+        return self.failures >= self.alert_after and not self.alerted
+
+    def alert_posted(self):
+        self.alerted = True
+
+    def succeeded(self):
+        """Start counting again after a successful sync. Returns whether the recovery is due: the admins were alerted."""
+        recovered = self.alerted
+        self.failures = 0
+        self.alerted = False
+        return recovered
+
+
 def parse_occurrences(ics, tz, now, lookahead, known=frozenset()):
     """The occurrences in the ICS bytes that are running at now or start within lookahead from it, give or take
     a day: plan makes the exact cut. Recurring events are expanded into their occurrences. Times without a timezone
@@ -136,7 +171,8 @@ def parse_occurrences(ics, tz, now, lookahead, known=frozenset()):
     The occurrences with a key in known are in there wherever they moved to, as long as they are in the feed.
 
     Events without a UID or an end, events with properties that can't be read, and cancelled occurrences
-    are left out. Raises FeedError when ics is not an ICS calendar.
+    are left out. Raises FeedError when ics is not an ICS calendar, and EmptyFeed when it has no events left
+    while known is not empty.
     """
     try:
         calendar = icalendar.Calendar.from_ical(ics)
@@ -146,6 +182,8 @@ def parse_occurrences(ics, tz, now, lookahead, known=frozenset()):
     # Skipped events are dropped before expanding, so the expansion only meets events it can read
     calendar.subcomponents = [component for component in calendar.subcomponents
                               if component.name != "VEVENT" or _is_usable(component)]
+    if known and not calendar.walk("VEVENT"):
+        raise EmptyFeed(f"Calendar feed has no events while the bot manages {len(known)}, skipped to not cancel them all")
 
     # The expansion drops RRULE and RDATE, so whether an occurrence belongs to a series is read beforehand
     recurring = {_uid(component) for component in calendar.walk("VEVENT")
@@ -415,7 +453,8 @@ async def sync(guild, ics_url, tz, lookahead, announce_channel=None, ping_role=N
     announcement. Occurrences that are over are forgotten, and their events quietly deleted when Discord still has
     them. Returns a Summary.
 
-    Raises FeedError, before anything changes, when the feed can't be downloaded or parsed, and discord.HTTPException
+    Raises FeedError, before anything changes, when the feed can't be downloaded or parsed, EmptyFeed (a FeedError)
+    when it has no events while the bot manages some, and discord.HTTPException
     when the server's events can't be read. An event that Discord refuses is logged and tried again on the next sync.
     """
     now = datetime.now(timezone.utc)

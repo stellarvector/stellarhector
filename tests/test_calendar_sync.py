@@ -520,6 +520,91 @@ SUMMARY:Weekly meeting
             calendar_sync.parse_occurrences(b"<html>Not found</html>", "Europe/Brussels", NOW, WINDOW)
 
 
+class EmptyFeedTest(unittest.TestCase):
+    def test_empty_feed_while_events_are_managed_raises(self):
+        with self.assertRaises(calendar_sync.EmptyFeed):
+            parse(known=[("meeting-1", "")])
+
+    def test_empty_feed_is_a_feed_error(self):
+        # So the sync skips it like a failed download, changing nothing
+        self.assertTrue(issubclass(calendar_sync.EmptyFeed, calendar_sync.FeedError))
+
+    def test_empty_feed_without_managed_events_is_fine(self):
+        self.assertEqual(parse(), [])
+
+    def test_feed_with_only_unusable_events_while_events_are_managed_raises(self):
+        with self.assertLogs("bot", level="WARNING"), self.assertRaises(calendar_sync.EmptyFeed):
+            parse("UID:meeting-1\nDTSTART:20261010T180000Z\nSUMMARY:No end", known=[("meeting-1", "")])
+
+    def test_feed_with_events_outside_the_window_is_not_empty(self):
+        later = "UID:later\nDTSTART:20270110T180000Z\nDTEND:20270110T200000Z"
+
+        self.assertEqual(parse(later, known=[("meeting-1", "")]), [])
+
+    def test_feed_with_only_cancelled_events_is_not_empty(self):
+        cancelled = "UID:meeting-1\nDTSTART:20261010T180000Z\nDTEND:20261010T200000Z\nSTATUS:CANCELLED"
+
+        self.assertEqual(parse(cancelled, known=[("meeting-1", "")]), [])
+
+
+class FeedHealthTest(unittest.TestCase):
+    def fail_times(self, health, times):
+        """Whether each of times failures asks for the alert."""
+        return [health.failed() for _ in range(times)]
+
+    def test_alert_is_due_on_the_tenth_consecutive_failure(self):
+        health = calendar_sync.FeedHealth(alert_after=10)
+
+        self.assertEqual(self.fail_times(health, 10), [False] * 9 + [True])
+
+    def test_alert_is_not_due_again_once_posted(self):
+        health = calendar_sync.FeedHealth(alert_after=10)
+        self.fail_times(health, 10)
+        health.alert_posted()
+
+        self.assertEqual(self.fail_times(health, 5), [False] * 5)
+
+    def test_alert_that_could_not_be_posted_is_due_on_the_next_failure(self):
+        health = calendar_sync.FeedHealth(alert_after=10)
+        self.fail_times(health, 10)
+
+        self.assertTrue(health.failed())
+
+    def test_success_resets_the_count(self):
+        health = calendar_sync.FeedHealth(alert_after=10)
+        self.fail_times(health, 9)
+        health.succeeded()
+
+        self.assertEqual(self.fail_times(health, 10), [False] * 9 + [True])
+
+    def test_recovery_is_due_on_the_first_success_after_an_alert(self):
+        health = calendar_sync.FeedHealth(alert_after=10)
+        self.fail_times(health, 10)
+        health.alert_posted()
+
+        self.assertEqual([health.succeeded(), health.succeeded()], [True, False])
+
+    def test_no_recovery_without_an_alert(self):
+        health = calendar_sync.FeedHealth(alert_after=10)
+        self.fail_times(health, 9)
+
+        self.assertFalse(health.succeeded())
+
+    def test_no_recovery_when_the_alert_could_not_be_posted(self):
+        health = calendar_sync.FeedHealth(alert_after=10)
+        self.fail_times(health, 10)
+
+        self.assertFalse(health.succeeded())
+
+    def test_new_failures_after_recovery_alert_again(self):
+        health = calendar_sync.FeedHealth(alert_after=10)
+        self.fail_times(health, 10)
+        health.alert_posted()
+        health.succeeded()
+
+        self.assertEqual(self.fail_times(health, 10), [False] * 9 + [True])
+
+
 class RecurringTest(unittest.TestCase):
     def test_weekly_event_has_one_occurrence_per_week_in_the_window(self):
         occurrences = parse(WEEKLY)
