@@ -21,7 +21,7 @@ Role names (not IDs), as they appear on the server:
 
 - `ADMIN_ROLE`: admins (e.g. `sv{admin}`).
 - `MANAGER_ROLE`: managers (e.g. `sv{manager}`), may run the CTF management commands (set up, release, archive and remove CTFs, add and remove players, unsolve challenges, archive channels, post the CTFtime table).
-- `MODERATOR_ROLE`: moderators (e.g. `sv{moderator}`), may add and remove players of a CTF.
+- `MODERATOR_ROLE`: moderators (e.g. `sv{moderator}`), may add and remove players of a CTF and make its last call.
 - `CORE_PLAYER_ROLE`, `KNOWN_PLAYER_ROLE`, `PLAYER_ROLE`: the player tiers. Core and known players (and staff) join a CTF with its Join button right away; players wait for a moderator; anyone else can't join that way.
 - `MEMBER_ROLE`: every member of the team.
 
@@ -129,6 +129,7 @@ All these buttons keep working after a restart: their `custom_id` holds the CTF'
 Commands find their CTF from the channel they are run in, by the IDs in `ctfs`, so renaming a CTF's channels, category or role by hand breaks nothing. `locate()` in `utils/ctf_places.py` tells what the channel is: the CTF's main channel, its #bot, a category channel (any other channel in its category), a challenge thread (a thread in a category channel), or not a place in a CTF. Run in the wrong place, a command replies, only to the user, where to run it.
 
 - `/add-player <player>`, `/remove-player <player>`: admins, managers and moderators, in #bot. They give or take away the CTF role and put the player on, or take them off, the CTF's player list (the `ctf_players` table: CTF, user, `joined` or `pending`, approval card message, joined at).
+- `/last-call`: admins, managers and moderators, in #bot. Posts the join message again at the bottom of `UPCOMING_CTFS_CHANNEL_ID` with "Last call" in its title and the same players, deletes the old one (also fine when it was already deleted by hand) and records when the last call was done. Its Join button works as before. It can be run again to move it down once more, and is refused once joining is closed.
 - `/release-ctf`: admins and managers, in #bot. #bot stays visible to staff only.
 - `/archive-ctf`: admins and managers, in #bot. Archives the CTF's channels, except #bot, and records when it was archived.
 - `/remove-ctf [force]`: admins and managers, in #bot. Refused when the CTF was never archived, unless `force` is set. Deletes the CTF's channels and role, then #bot and the category, and marks it removed. When a channel or the role can't be deleted it stops before #bot, so it can be run again; once #bot is gone the admins are told in `ADMIN_CHANNEL_ID`.

@@ -97,6 +97,13 @@ class JoinMessageTest(unittest.TestCase):
         self.assertTrue(message.endswith(
             "**Playing (25):** " + ", ".join(f"<@{i}>" for i in range(1, 21)) + " and 5 more"))
 
+    def test_after_the_last_call_it_says_last_call(self):
+        ctf = replace(CTF, last_call_at=utc(2026, 10, 9, 8))
+
+        self.assertEqual(ctf_join.join_message(ctf, [42], []),
+                         "## :rotating_light: Last call: Foo CTF\n"
+                         "**Playing (1):** <@42>")
+
     def test_name_shows_as_typed_without_markdown(self):
         self.assertTrue(ctf_join.join_message(replace(CTF, name="*Foo* CTF"), [], []).startswith(
             "## :zap: \\*Foo\\* CTF\n"))

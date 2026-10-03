@@ -83,6 +83,13 @@ def set_join_message(ctf_id, channel_id, message_id):
                      (channel_id, message_id, ctf_id))
 
 
+def mark_last_call(ctf_id, channel_id, message_id, at):
+    """Remember that the last call was done at the time at, with the join message posted anew in that channel."""
+    with db.transaction() as conn:
+        conn.execute("UPDATE ctfs SET join_channel_id = ?, join_message_id = ?, last_call_at = ? WHERE id = ?",
+                     (channel_id, message_id, db.time_text(at), ctf_id))
+
+
 def delete(ctf_id):
     """Forget the CTF and its player list entirely, as if it was never set up (unlike mark_removed)."""
     with db.transaction() as conn:

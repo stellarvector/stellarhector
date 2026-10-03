@@ -19,6 +19,7 @@ LOAD_COMMANDS = [
     "add_player",
     "remove_ctf",
     "remove_player",
+    "last_call",
     "solved",
     "unsolve",
     "archive_ctf",

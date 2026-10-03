@@ -79,7 +79,26 @@ class FakeChannel:
         return self.messages[-1]
 
     def get_partial_message(self, message_id):
-        return next(message for message in self.messages if message.id == message_id)
+        return FakePartialMessage(self, message_id)
+
+
+class FakePartialMessage:
+    """A message of channel known only by its ID, as Discord gives it: editing or deleting a message that is gone
+    fails."""
+    def __init__(self, channel, message_id):
+        self.channel, self.id = channel, message_id
+
+    def _message(self):
+        message = next((message for message in self.channel.messages if message.id == self.id), None)
+        if message is None:
+            raise http_error(discord.NotFound, 404)
+        return message
+
+    async def edit(self, content, allowed_mentions=None):
+        await self._message().edit(content, allowed_mentions)
+
+    async def delete(self):
+        self.channel.messages.remove(self._message())
 
 
 class FakeGuild:

@@ -1,5 +1,6 @@
-"""Signing up for a CTF: the join message in #upcoming-ctfs with its Join button, the approval cards in the CTF's #bot
-on which staff let plain players in, and the Leave button on the guide in the CTF's main channel.
+"""Signing up for a CTF: the join message in #upcoming-ctfs with its Join button (posted anew at the bottom by the last
+call), the approval cards in the CTF's #bot on which staff let plain players in, and the Leave button on the guide in
+the CTF's main channel.
 
 decide, join_message, approval_card and decision_line are pure: who may join how, and what the join message and the
 cards say. The buttons keep working after a restart: their custom_id holds the CTF's ID, and register makes the bot
@@ -9,7 +10,7 @@ import asyncio
 import logging
 from collections import defaultdict
 import sqlite3
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from enum import Enum
 
@@ -22,6 +23,10 @@ from utils.text import cut
 PLAYER_LIMIT = 20
 SESSION_LIMIT = 5
 SESSION_TITLE_LIMIT = 100
+
+
+class LastCallRefused(Exception):
+    """The last call was not done, and nothing changed; the message says why, for the user."""
 
 
 class Outcome(Enum):
@@ -117,9 +122,10 @@ def decide(role_names, roles, status, closed):
 
 
 def join_message(ctf, player_ids, sessions):
-    """The join message of the CTF: its name, CTFtime link and dates, its on-campus sessions (ctftime_check.Sessions),
-    and who plays (the user IDs of the joined players, in the order they joined)."""
-    lines = [f"## :zap: {discord.utils.escape_markdown(ctf.name)}"]
+    """The join message of the CTF: its name (as a last call once that was done), CTFtime link and dates, its on-campus
+    sessions (ctftime_check.Sessions), and who plays (the user IDs of the joined players, in the order they joined)."""
+    name = discord.utils.escape_markdown(ctf.name)
+    lines = [f"## :zap: {name}" if ctf.last_call_at is None else f"## :rotating_light: Last call: {name}"]
     if ctf.ctftime_id is not None:
         lines.append(f"<https://ctftime.org/event/{ctf.ctftime_id}/>")
     if ctf.start is not None and ctf.finish is not None:
@@ -177,18 +183,68 @@ def _period(start, end):
     return f"<t:{int(start.timestamp())}:F> to <t:{int(end.timestamp())}:F>"
 
 
+async def last_call(guild, ctf, channel_id, now):
+    """Post the CTF's join message anew, with its last call wording and the same players, at the bottom of the channel
+    with channel_id (#upcoming-ctfs), and delete the old one. Records now as the time of the last call and returns
+    the CTF as stored then.
+
+    Raises LastCallRefused when joining the CTF is closed or the channel does not exist. An old join message that is
+    gone already is fine; one that can't be deleted is logged, as the new one stands.
+    """
+    channel = None if channel_id is None else guild.get_channel(channel_id)
+    if channel is None:
+        raise LastCallRefused("#upcoming-ctfs is not configured or no longer exists.")
+
+    # Under the refresh lock, so no join or leave edits the old message in between
+    async with _refresh_locks[ctf.id]:
+        # As stored now: joining may have closed since ctf was read
+        old = ctfs.get(ctf.id)
+        if is_closed(ctf) or is_closed(old):
+            raise LastCallRefused(f"Joining **{discord.utils.escape_markdown(ctf.name)}** is closed, there is no "
+                                  f"last call to make.")
+
+        message = await channel.send(current_join_message(replace(old, last_call_at=now), now),
+                                     view=join_view(ctf.id), allowed_mentions=discord.AllowedMentions.none())
+        try:
+            ctfs.mark_last_call(ctf.id, channel.id, message.id, now)
+        except BaseException:
+            # Not stored, so no refresh would ever update it: the old join message stays the one
+            await message.delete()
+            raise
+        await _delete_join_message(guild, old)
+    return ctfs.get(ctf.id)
+
+
+async def _delete_join_message(guild, ctf):
+    if ctf.join_message_id is None:
+        return
+    channel = guild.get_channel(ctf.join_channel_id)
+    if channel is None:
+        return
+
+    try:
+        await channel.get_partial_message(ctf.join_message_id).delete()
+    except discord.NotFound:
+        pass
+    except discord.HTTPException:
+        logging.getLogger("bot").exception(f"Could not delete the old join message of CTF {ctf.name!r}, delete it "
+                                           f"by hand")
+
+
 async def refresh_join_message(guild, ctf):
     """Show the CTF's current player list and sessions on its join message, if it has one. A join message that can't
     be edited is logged: the player list itself is right, and the next refresh tries again."""
-    if ctf.join_message_id is None:
-        return
-
-    channel = guild.get_channel(ctf.join_channel_id)
-    if channel is None:
-        logging.getLogger("bot").warning(f"The join message channel of CTF {ctf.name!r} no longer exists")
-        return
-
     async with _refresh_locks[ctf.id]:
+        # As stored now: the last call may have moved the join message since ctf was read
+        ctf = ctfs.get(ctf.id)
+        if ctf is None or ctf.join_message_id is None:
+            return
+
+        channel = guild.get_channel(ctf.join_channel_id)
+        if channel is None:
+            logging.getLogger("bot").warning(f"The join message channel of CTF {ctf.name!r} no longer exists")
+            return
+
         try:
             await channel.get_partial_message(ctf.join_message_id).edit(
                 content=current_join_message(ctf), allowed_mentions=discord.AllowedMentions.none())
@@ -196,9 +252,11 @@ async def refresh_join_message(guild, ctf):
             logging.getLogger("bot").exception(f"Could not update the join message of CTF {ctf.name!r}")
 
 
-def current_join_message(ctf):
-    """The CTF's join message as it should read now, with its current players and sessions."""
-    return join_message(ctf, joined_ids(ctf.id), current_sessions(ctf, datetime.now(timezone.utc)))
+def current_join_message(ctf, now=None):
+    """The CTF's join message as it should read at now (by default the current time), with its current players and
+    sessions."""
+    now = now or datetime.now(timezone.utc)
+    return join_message(ctf, joined_ids(ctf.id), current_sessions(ctf, now))
 
 
 def joined_ids(ctf_id):

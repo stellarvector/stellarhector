@@ -17,6 +17,7 @@ To play a CTF, click **Join** on its message in #upcoming-ctfs; the **Leave** bu
 For admins, managers and moderators, in the #bot channel of a CTF:
 `/add-player` - Give a member access to the CTF and put them on its player list.
 `/remove-player` - Take a member's access to the CTF away and take them off its player list.
+`/last-call` - Post the CTF's join message again at the bottom of #upcoming-ctfs, as a last call.
 
 For admins and managers:
 `/setup-ctf` - Set up a new CTF: its role, category, main channel and #bot channel. Give the CTFtime event ID to also store its dates.
