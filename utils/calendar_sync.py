@@ -8,15 +8,18 @@ import logging
 from collections import namedtuple
 from dataclasses import dataclass, replace
 from datetime import datetime, time, timedelta, timezone
+from typing import NamedTuple
 from zoneinfo import ZoneInfo
 
 import aiohttp
 import discord
 import icalendar
 import recurring_ical_events
+import x_wr_timezone
 
 import core.db as db
 from utils.ctftime import parse_ctftime_id
+from utils.text import cut, inline_code
 
 # Discord refuses events that a bot creates with a start in the past, so running events start this much from now
 START_DELAY = timedelta(minutes=1)
@@ -56,6 +59,19 @@ FAILURES_BEFORE_ALERT = 10
 # and end is the end the occurrence had in the calendar at the last sync
 StoredOccurrence = namedtuple("StoredOccurrence", ["discord_event_id", "announcement_message_id", "end"])
 
+# Selects the calendar_occurrences row of an OccurrenceKey; its start column holds the slot
+WHERE_KEY = "uid = ? AND start = ?"
+
+# The create and edit work of syncs that were stopped while it ran
+_unfinished = set()
+
+
+class OccurrenceKey(NamedTuple):
+    """What identifies an occurrence across syncs, and its row in calendar_occurrences: its UID and its slot as
+    stored (db.time_text), empty for an event that does not recur."""
+    uid: str
+    slot: str
+
 
 class FeedError(Exception):
     """The calendar feed could not be downloaded or is not an ICS calendar."""
@@ -86,7 +102,7 @@ class Occurrence:
     def key(self):
         """What identifies the occurrence across syncs: its UID and its slot in UTC, or only its UID when it does not
         recur, so moving it keeps the key."""
-        return self.uid, "" if self.slot is None else _utc_text(self.slot)
+        return OccurrenceKey(self.uid, "" if self.slot is None else db.time_text(self.slot))
 
     @property
     def ctftime_id(self):
@@ -121,7 +137,8 @@ class Update:
 
 @dataclass(frozen=True)
 class Recreate:
-    """Create the bot's Discord event for occurrence again: it was deleted in Discord."""
+    """Create the bot's Discord event for occurrence again, deleting the one Discord still has: it was deleted in
+    Discord, or it is running there while the calendar moved it to later, a start Discord won't move."""
     occurrence: Occurrence
     details: EventDetails
 
@@ -130,13 +147,13 @@ class Recreate:
 class Cancel:
     """Delete the bot's Discord event for the occurrence with key and tell the announcement: it is gone from the
     calendar or cancelled there."""
-    key: tuple
+    key: OccurrenceKey
 
 
 @dataclass(frozen=True)
 class Prune:
     """Forget the occurrence with key, deleting its Discord event when that is still there: it is over."""
-    key: tuple
+    key: OccurrenceKey
 
 
 @dataclass(frozen=True)
@@ -167,11 +184,15 @@ class FeedHealth:
         self.alerted = True
 
     def succeeded(self):
-        """Start counting again after a successful sync. Returns whether the recovery is due: the admins were alerted."""
+        """Start counting again after a successful sync. Returns whether the recovery is due: the admins were alerted
+        and not told yet that it works again (recovery_posted)."""
         recovered = self.alerted
         self.failures = 0
-        self.alerted = False
         return recovered
+
+    def recovery_posted(self):
+        """Stop the recovery being due; until then every successful sync asks for it again."""
+        self.alerted = False
 
 
 def parse_occurrences(ics, tz, now, lookahead, known=frozenset()):
@@ -193,6 +214,8 @@ def parse_occurrences(ics, tz, now, lookahead, known=frozenset()):
     # Skipped events are dropped before expanding, so the expansion only meets events it can read
     calendar.subcomponents = [component for component in calendar.subcomponents
                               if component.name != "VEVENT" or _is_usable(component)]
+    # The expansion reads floating times in X-WR-TIMEZONE; converted once here, so _find reads them in that zone too
+    calendar = _standard(calendar)
     if known and not calendar.walk("VEVENT"):
         raise EmptyFeed(f"Calendar feed has no events while the bot manages {len(known)}, skipped to not cancel them all")
 
@@ -226,7 +249,7 @@ def _find(calendar, key, zone, recurring):
     if uid not in recurring and slot:
         return []
     overrides = [event for event in events if "RECURRENCE-ID" in event
-                 and _utc_text(_slot(event.decoded("RECURRENCE-ID"), zone)) == slot]
+                 and db.time_text(_slot(event.decoded("RECURRENCE-ID"), zone)) == slot]
 
     # The event on its own, with the calendar's timezones, so expanding it gives just its occurrences
     alone = icalendar.Calendar(calendar)
@@ -237,9 +260,18 @@ def _find(calendar, key, zone, recurring):
     else:
         # The rule goes on forever, so the series is only expanded around the slot
         alone.subcomponents = others + events
-        start = datetime.fromisoformat(slot)
+        start = db.parse_time(slot)
         expansion = lambda: recurring_ical_events.of(alone).between(start - EXPANSION_MARGIN, start + EXPANSION_MARGIN)
     return [occurrence for occurrence in _occurrences(_expand(expansion), zone, recurring) if occurrence.key == key]
+
+
+def _standard(calendar):
+    """calendar with the floating times read in its X-WR-TIMEZONE, when it has one. Raises FeedError when that
+    timezone is unknown."""
+    try:
+        return x_wr_timezone.to_standard(calendar)
+    except (KeyError, ValueError) as e:
+        raise FeedError(f"Calendar feed has an unknown X-WR-TIMEZONE: {e!r}") from e
 
 
 def _expand(expansion):
@@ -313,11 +345,6 @@ def _slot(recurrence_id, zone):
     return _start_of_day(recurrence_id, zone)
 
 
-def _utc_text(moment):
-    """moment as stored and in keys: a UTC ISO-8601 string."""
-    return moment.astimezone(timezone.utc).isoformat()
-
-
 def _to_utc(moment, zone):
     """moment in UTC, reading a floating time as one in zone."""
     if moment.tzinfo is None:
@@ -368,6 +395,10 @@ def plan(occurrences, known, ends, now, lookahead):
         if current is None:
             actions.append(Recreate(occurrence, details))
             continue
+        if current.start <= now and occurrence.start > earliest_start:
+            # Running in Discord, which won't move the start of a running event, while the calendar moved it to later
+            actions.append(Recreate(occurrence, details))
+            continue
         if occurrence.start <= earliest_start and current.start <= earliest_start:
             # Started both in the calendar and in Discord: the start Discord has can't be put in the past anyway
             details = replace(details, start=current.start)
@@ -389,7 +420,7 @@ def announcement(action, event_url, ping_role=None):
     embed = discord.Embed(
         title=_title(occurrence, TITLE_LIMIT),
         url=event_url,
-        description=_cut(occurrence.description.strip(), EXCERPT_LIMIT) or None,
+        description=cut(occurrence.description.strip(), EXCERPT_LIMIT) or None,
     )
     embed.add_field(name="Start", value=_timestamp(occurrence.start), inline=False)
     embed.add_field(name="End", value=_timestamp(occurrence.end), inline=False)
@@ -409,9 +440,7 @@ def summary_reply(summary):
 
 def skipped_reply(error):
     """The /calendar-sync reply when the sync was skipped because of the FeedError error."""
-    # Error texts can be long or hold backticks, which would break the inline code
-    reason = str(error).replace("`", "'")[:REASON_LIMIT]
-    return f":warning: Calendar sync skipped, nothing changed. Reason: `{reason}`"
+    return f":warning: Calendar sync skipped, nothing changed. Reason: {inline_code(str(error), REASON_LIMIT)}"
 
 
 def _timestamp(moment):
@@ -430,12 +459,12 @@ def _details(occurrence, earliest_start):
 
 
 def _title(occurrence, limit):
-    return _cut(occurrence.title.strip() or NO_TITLE, limit)
+    return cut(occurrence.title.strip() or NO_TITLE, limit)
 
 
 def _description(occurrence):
     """DESCRIPTION cut to Discord's limit, followed by URL when it fits and is not in there yet."""
-    description = _cut(occurrence.description.strip(), DESCRIPTION_LIMIT)
+    description = cut(occurrence.description.strip(), DESCRIPTION_LIMIT)
     url = occurrence.url.strip()
     if not url or url in description:
         return description
@@ -447,15 +476,11 @@ def _description(occurrence):
 def _location(occurrence):
     """LOCATION, else URL when it fits whole, else a pointer to the description."""
     if occurrence.location.strip():
-        return _cut(occurrence.location.strip(), LOCATION_LIMIT)
+        return cut(occurrence.location.strip(), LOCATION_LIMIT)
     url = occurrence.url.strip()
     if url and len(url) <= LOCATION_LIMIT:
         return url
     return NO_LOCATION
-
-
-def _cut(text, limit):
-    return text if len(text) <= limit else text[:limit - 1] + "…"
 
 
 async def download(url):
@@ -482,6 +507,10 @@ async def sync(guild, ics_url, tz, lookahead, announce_channel=None, ping_role=N
     when it has no events while the bot manages some, and discord.HTTPException
     when the server's events can't be read. An event that Discord refuses is logged and tried again on the next sync.
     """
+    # A sync that was stopped may still be creating or editing; wait for it, so its event is not created again
+    if _unfinished:
+        await asyncio.wait(_unfinished)
+
     now = datetime.now(timezone.utc)
     stored = _stored_occurrences()
     occurrences = parse_occurrences(await fetch(ics_url), tz, now, lookahead, stored.keys())
@@ -505,7 +534,7 @@ async def sync(guild, ics_url, tz, lookahead, announce_channel=None, ping_role=N
             if isinstance(action, Update):
                 event = await _update(events[key], action)
             else:
-                event = await _create(guild, action)
+                event = await _create(guild, action, events.get(key))
         except discord.HTTPException:
             logging.getLogger("bot").exception(f"Discord refused the event for calendar occurrence {key}")
             continue
@@ -537,11 +566,11 @@ def remember_occurrences(occurrences):
             if occurrence.key in remembered:
                 continue
             remembered.add(occurrence.key)
-            uid, slot = occurrence.key
-            values = (_utc_text(occurrence.start), _title(occurrence, NAME_LIMIT), occurrence.ctftime_id)
+            values = (db.time_text(occurrence.start), _title(occurrence, NAME_LIMIT), occurrence.ctftime_id)
             # Only written when something changed, so a sync that changes nothing writes nothing
-            conn.execute("UPDATE calendar_occurrences SET start_time = ?, title = ?, ctftime_id = ? WHERE uid = ? AND start = ?"
-                         " AND (start_time IS NOT ? OR title IS NOT ? OR ctftime_id IS NOT ?)", (*values, uid, slot, *values))
+            conn.execute(f"UPDATE calendar_occurrences SET start_time = ?, title = ?, ctftime_id = ? WHERE {WHERE_KEY}"
+                         " AND (start_time IS NOT ? OR title IS NOT ? OR ctftime_id IS NOT ?)",
+                         (*values, *occurrence.key, *values))
 
 
 def _details_in_discord(event):
@@ -574,14 +603,21 @@ def _start(action):
     return start if start < action.details.end else None
 
 
-async def _create(guild, action):
-    """The new Discord event for a Create or Recreate action, or None when it is too late to create it.
+async def _create(guild, action, replaced=None):
+    """The new Discord event for a Create or Recreate action, or None when it is too late to create it. replaced is
+    the event Discord still has for a Recreate, deleted first so the occurrence never has two.
 
     The event is remembered right away, with no await in between, so the next sync can't create it again.
     """
     start = _start(action)
     if start is None:
         return None
+
+    if replaced is not None:
+        try:
+            await replaced.delete()
+        except discord.NotFound:
+            pass
 
     async def create_and_remember():
         details = action.details
@@ -594,19 +630,27 @@ async def _create(guild, action):
             location=details.location,
             description=details.description or discord.utils.MISSING,
         )
-        uid, slot = action.occurrence.key
-        end = _utc_text(action.occurrence.end)
-        with db.transaction() as conn:
-            if isinstance(action, Recreate):
-                conn.execute("UPDATE calendar_occurrences SET discord_event_id = ?, end_time = ? WHERE uid = ? AND start = ?",
-                             (event.id, end, uid, slot))
-            else:
-                conn.execute("INSERT INTO calendar_occurrences (uid, start, discord_event_id, end_time) VALUES (?, ?, ?, ?)",
-                             (uid, slot, event.id, end))
+        key = action.occurrence.key
+        end = db.time_text(action.occurrence.end)
+        try:
+            with db.transaction() as conn:
+                if isinstance(action, Recreate):
+                    conn.execute(f"UPDATE calendar_occurrences SET discord_event_id = ?, end_time = ? WHERE {WHERE_KEY}",
+                                 (event.id, end, *key))
+                else:
+                    conn.execute("INSERT INTO calendar_occurrences (uid, start, discord_event_id, end_time) VALUES (?, ?, ?, ?)",
+                                 (*key, event.id, end))
+        except Exception:
+            # An event the bot doesn't remember would be created again on the next sync and never be cleaned up
+            try:
+                await event.delete()
+            except discord.HTTPException:
+                logging.getLogger("bot").exception(f"Could not delete the unremembered event {event.id} of calendar occurrence {key}")
+            raise
         return event
 
     # Shielded: when the job times out mid-create, the event is still remembered once Discord made it
-    return await asyncio.shield(create_and_remember())
+    return await _finish_even_if_stopped(create_and_remember())
 
 
 async def _update(event, action):
@@ -624,14 +668,21 @@ async def _update(event, action):
     async def edit_and_remember():
         edited = await event.edit(name=details.name, description=details.description, location=details.location,
                                   end_time=details.end, **changes)
-        uid, slot = action.occurrence.key
         with db.transaction() as conn:
-            conn.execute("UPDATE calendar_occurrences SET end_time = ? WHERE uid = ? AND start = ?",
-                         (_utc_text(action.occurrence.end), uid, slot))
+            conn.execute(f"UPDATE calendar_occurrences SET end_time = ? WHERE {WHERE_KEY}",
+                         (db.time_text(action.occurrence.end), *action.occurrence.key))
         return edited
 
     # Shielded like create_and_remember, so the end stays the one Discord has
-    return await asyncio.shield(edit_and_remember())
+    return await _finish_even_if_stopped(edit_and_remember())
+
+
+async def _finish_even_if_stopped(work):
+    """Await the coroutine work, which goes on when the sync is stopped meanwhile; the next sync waits for it."""
+    task = asyncio.ensure_future(work)
+    _unfinished.add(task)
+    task.add_done_callback(_unfinished.discard)
+    return await asyncio.shield(task)
 
 
 async def _cancel(event, channel, message_id, key):
@@ -664,9 +715,8 @@ async def _delete_and_forget(event, key):
             logging.getLogger("bot").exception(f"Discord refused deleting the event for calendar occurrence {key}")
             return False
 
-    uid, slot = key
     with db.transaction() as conn:
-        conn.execute("DELETE FROM calendar_occurrences WHERE uid = ? AND start = ?", (uid, slot))
+        conn.execute(f"DELETE FROM calendar_occurrences WHERE {WHERE_KEY}", key)
     return True
 
 
@@ -679,10 +729,9 @@ async def _announce(channel, action, event, ping_role):
         logging.getLogger("bot").exception(f"Could not announce calendar event {event.id}")
         return
 
-    uid, slot = action.occurrence.key
     with db.transaction() as conn:
-        conn.execute("UPDATE calendar_occurrences SET announcement_message_id = ? WHERE uid = ? AND start = ?",
-                     (message.id, uid, slot))
+        conn.execute(f"UPDATE calendar_occurrences SET announcement_message_id = ? WHERE {WHERE_KEY}",
+                     (message.id, *action.occurrence.key))
 
 
 async def _edit_announcement(channel, message_id, action, event, ping_role):
@@ -697,7 +746,8 @@ async def _edit_announcement(channel, message_id, action, event, ping_role):
 def _stored_occurrences():
     """The StoredOccurrence per occurrence key the bot created an event for."""
     with db.transaction() as conn:
-        return {(row["uid"], row["start"]): StoredOccurrence(row["discord_event_id"], row["announcement_message_id"],
-                                                             datetime.fromisoformat(row["end_time"]))
+        return {OccurrenceKey(row["uid"], row["start"]): StoredOccurrence(row["discord_event_id"],
+                                                                          row["announcement_message_id"],
+                                                                          db.parse_time(row["end_time"]))
                 for row in conn.execute("SELECT uid, start, discord_event_id, announcement_message_id, end_time "
                                         "FROM calendar_occurrences")}

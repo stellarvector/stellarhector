@@ -1,9 +1,14 @@
+import asyncio
+import sqlite3
+import tempfile
 import unittest
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from zoneinfo import ZoneInfo
 
 import discord
 
+from core import db
 from utils import calendar_sync
 from utils.calendar_sync import Cancel, Create, EventDetails, Occurrence, Prune, Recreate, Update
 
@@ -185,6 +190,15 @@ class MirrorTest(unittest.TestCase):
         in_discord = event(start=NOW + timedelta(seconds=40), end=NOW + timedelta(hours=1))
 
         self.assertEqual(plan([running], known={("meeting-1", ""): in_discord}), [])
+
+    def test_running_event_moved_to_later_in_the_calendar_is_recreated(self):
+        # Discord won't move the start of a running event, so it makes way for one at the new start
+        later = occurrence(start=NOW + timedelta(hours=3), end=NOW + timedelta(hours=5))
+        in_discord = event(start=NOW - timedelta(minutes=10), end=NOW + timedelta(hours=1))
+
+        actions = plan([later], known={("meeting-1", ""): in_discord})
+
+        self.assertEqual(actions, [Recreate(later, event(start=later.start, end=later.end))])
 
     def test_event_moved_into_the_past_in_the_calendar_starts_in_a_minute(self):
         running = occurrence(start=NOW - timedelta(hours=1), end=NOW + timedelta(hours=1))
@@ -582,7 +596,17 @@ class FeedHealthTest(unittest.TestCase):
         self.fail_times(health, 10)
         health.alert_posted()
 
-        self.assertEqual([health.succeeded(), health.succeeded()], [True, False])
+        self.assertTrue(health.succeeded())
+        health.recovery_posted()
+        self.assertFalse(health.succeeded())
+
+    def test_recovery_that_could_not_be_posted_is_due_on_the_next_success(self):
+        health = calendar_sync.FeedHealth(alert_after=10)
+        self.fail_times(health, 10)
+        health.alert_posted()
+        health.succeeded()
+
+        self.assertTrue(health.succeeded())
 
     def test_no_recovery_without_an_alert(self):
         health = calendar_sync.FeedHealth(alert_after=10)
@@ -601,6 +625,7 @@ class FeedHealthTest(unittest.TestCase):
         self.fail_times(health, 10)
         health.alert_posted()
         health.succeeded()
+        health.recovery_posted()
 
         self.assertEqual(self.fail_times(health, 10), [False] * 9 + [True])
 
@@ -705,6 +730,21 @@ class RecurringTest(unittest.TestCase):
         moved = [occurrence for occurrence in occurrences if occurrence.title == "Moved meeting"]
         self.assertEqual([(occurrence.start, occurrence.key) for occurrence in moved],
                          [(utc(2026, 12, 17, 19), ("series", "2026-10-17T18:00:00+00:00"))])
+
+    def test_known_floating_override_moved_beyond_the_window_is_parsed_in_the_calendars_timezone(self):
+        # Floating times are read in X-WR-TIMEZONE, so the slot found beyond the window is the one the window had
+        ics = (b"BEGIN:VCALENDAR\r\nVERSION:2.0\r\nX-WR-TIMEZONE:America/New_York\r\n"
+               b"BEGIN:VEVENT\r\nUID:series\r\nDTSTART:20261010T180000\r\nDTEND:20261010T200000\r\nRRULE:FREQ=WEEKLY\r\n"
+               b"END:VEVENT\r\nBEGIN:VEVENT\r\nUID:series\r\nRECURRENCE-ID:20261017T180000\r\n"
+               b"DTSTART:20261217T180000\r\nDTEND:20261217T200000\r\nSUMMARY:Moved meeting\r\nEND:VEVENT\r\n"
+               b"END:VCALENDAR\r\n")
+        key = ("series", "2026-10-17T22:00:00+00:00")
+        in_window = calendar_sync.parse_occurrences(ics, "Europe/Brussels", NOW, timedelta(days=90))
+        self.assertIn(key, [occurrence.key for occurrence in in_window if occurrence.title == "Moved meeting"])
+
+        occurrences = calendar_sync.parse_occurrences(ics, "Europe/Brussels", NOW, WINDOW, {key})
+
+        self.assertEqual([occurrence.start for occurrence in occurrences if occurrence.key == key], [utc(2026, 12, 17, 23)])
 
     def test_known_occurrence_of_a_series_beyond_the_window_is_parsed(self):
         # Created while the window was longer, so it is still in the feed and must not count as cancelled
@@ -836,6 +876,119 @@ class CtfSessionTest(unittest.TestCase):
         meeting = occurrence(url="https://example.com", description="Meetup with pizza")
 
         self.assertIsNone(meeting.ctftime_id)
+
+
+class FakeEvent:
+    """A Discord scheduled event the fake guild has; delete takes it out of the guild."""
+
+    def __init__(self, guild, event_id, name, start_time, end_time, location, description=None,
+                 status=discord.EventStatus.scheduled):
+        self.guild = guild
+        self.id = event_id
+        self.name = name
+        self.start_time = start_time
+        self.end_time = end_time
+        self.location = location
+        self.description = description
+        self.status = status
+        self.url = f"https://discord.com/events/1/{event_id}"
+
+    async def delete(self):
+        self.guild.events.remove(self)
+
+
+class FakeGuild:
+    """Creates and lists FakeEvents; create_scheduled_event waits for release when it is set."""
+
+    def __init__(self):
+        self.events = []
+        self.next_id = 1
+        self.creating = asyncio.Event()
+        self.release = None
+
+    async def fetch_scheduled_events(self, with_counts=True):
+        return list(self.events)
+
+    async def create_scheduled_event(self, name, start_time, end_time, location, description=None, **kwargs):
+        self.creating.set()
+        if self.release is not None:
+            await self.release.wait()
+        event = FakeEvent(self, self.next_id, name, start_time, end_time, location,
+                          None if description is discord.utils.MISSING else description)
+        self.next_id += 1
+        self.events.append(event)
+        return event
+
+
+def ics_time(moment):
+    return moment.astimezone(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+
+
+class SyncTest(unittest.IsolatedAsyncioTestCase):
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        db.init(Path(tmp.name) / "test.db")
+        self.addCleanup(db.close)
+        self.guild = FakeGuild()
+        self.now = datetime.now(timezone.utc).replace(microsecond=0)
+
+    def feed_with_meeting(self, start, end):
+        body = f"UID:meeting-1\nDTSTART:{ics_time(start)}\nDTEND:{ics_time(end)}\nSUMMARY:Weekly meeting"
+
+        async def fetch(url):
+            return feed(body)
+        return fetch
+
+    async def sync(self, fetch):
+        return await calendar_sync.sync(self.guild, "https://calendar.example/feed.ics", "Europe/Brussels", WINDOW,
+                                        fetch=fetch)
+
+    def stored_event_ids(self):
+        with db.transaction() as conn:
+            return [row["discord_event_id"] for row in conn.execute("SELECT discord_event_id FROM calendar_occurrences")]
+
+    async def test_sync_stopped_while_creating_is_not_created_again_by_the_next_sync(self):
+        fetch = self.feed_with_meeting(self.now + timedelta(days=2), self.now + timedelta(days=2, hours=2))
+        self.guild.release = asyncio.Event()
+
+        stopped = asyncio.create_task(self.sync(fetch))
+        await self.guild.creating.wait()
+        stopped.cancel()
+        next_sync = asyncio.create_task(self.sync(fetch))
+        await asyncio.sleep(0)
+        self.guild.release.set()
+        await next_sync
+        with self.assertRaises(asyncio.CancelledError):
+            await stopped
+
+        self.assertEqual(len(self.guild.events), 1)
+        self.assertEqual(self.stored_event_ids(), [self.guild.events[0].id])
+
+    async def test_running_event_moved_to_later_is_replaced_by_one_at_the_new_start(self):
+        start = self.now + timedelta(hours=3)
+        await self.sync(self.feed_with_meeting(self.now - timedelta(hours=1), self.now + timedelta(hours=1)))
+        running = self.guild.events[0]
+        running.status = discord.EventStatus.active
+        running.start_time = self.now - timedelta(minutes=10)
+
+        summary = await self.sync(self.feed_with_meeting(start, start + timedelta(hours=2)))
+
+        self.assertEqual(summary.updated, 1)
+        self.assertEqual([event.start_time for event in self.guild.events], [start])
+        self.assertNotIn(running, self.guild.events)
+        self.assertEqual(self.stored_event_ids(), [self.guild.events[0].id])
+
+    async def test_event_is_deleted_again_when_it_cannot_be_remembered(self):
+        # An event the bot doesn't remember would be created again on every sync
+        with db.transaction() as conn:
+            conn.execute("CREATE TRIGGER refuse BEFORE INSERT ON calendar_occurrences BEGIN SELECT RAISE(ABORT, 'disk full'); END")
+        fetch = self.feed_with_meeting(self.now + timedelta(days=2), self.now + timedelta(days=2, hours=2))
+
+        with self.assertRaises(sqlite3.DatabaseError):
+            await self.sync(fetch)
+
+        self.assertEqual(self.guild.events, [])
 
 
 if __name__ == "__main__":

@@ -2,6 +2,7 @@ import logging
 import re
 import sqlite3
 from contextlib import contextmanager
+from datetime import datetime, timezone
 from pathlib import Path
 
 MIGRATION_FILE = re.compile(r"^(\d+)_.*\.sql$")
@@ -49,6 +50,16 @@ def transaction():
     except BaseException:
         _conn.rollback()
         raise
+
+
+def time_text(moment):
+    """moment as times are stored: a UTC ISO-8601 string. None stays None."""
+    return None if moment is None else moment.astimezone(timezone.utc).isoformat()
+
+
+def parse_time(text):
+    """The aware datetime stored as text by time_text. None stays None."""
+    return None if text is None else datetime.fromisoformat(text)
 
 
 def connect(path):

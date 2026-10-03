@@ -10,6 +10,7 @@ from zoneinfo import ZoneInfo
 import discord
 
 from utils import ctftime, ctftime_check
+from utils.text import cut
 
 # Discord refuses messages longer than this
 MESSAGE_LIMIT = 2000
@@ -184,7 +185,4 @@ def _add_months(year_month, count):
 
 def _cut(text, width):
     """text on one line without backticks, cut to width with … and padded to exactly width."""
-    text = " ".join(text.replace("`", "'").split())
-    if len(text) > width:
-        text = text[:width - 1] + "…"
-    return text.ljust(width)
+    return cut(" ".join(text.replace("`", "'").split()), width).ljust(width)

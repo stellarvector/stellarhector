@@ -7,12 +7,13 @@ import asyncio
 import logging
 from collections import defaultdict
 from dataclasses import dataclass, replace
-from datetime import datetime, timezone
+from datetime import datetime
 
 import discord
 
 import core.db as db
 from utils import ctftime
+from utils.text import cut
 
 # How many sessions an alert lists, and how much of a title it shows, to stay well under Discord's 2000 characters
 SESSION_LIMIT = 5
@@ -140,8 +141,7 @@ def _timestamp(moment):
 
 def _escaped(title):
     """title cut to TITLE_LIMIT, with its markdown escaped so it shows as typed."""
-    cut = title if len(title) <= TITLE_LIMIT else title[:TITLE_LIMIT - 1] + "…"
-    return discord.utils.escape_markdown(cut)
+    return discord.utils.escape_markdown(cut(title, TITLE_LIMIT))
 
 
 async def check(now, alert, get_event=ctftime.get_event):
@@ -183,8 +183,8 @@ def linked_sessions():
         rows = conn.execute("SELECT ctftime_id, title, start_time, end_time FROM calendar_occurrences "
                             "WHERE ctftime_id IS NOT NULL AND start_time IS NOT NULL ORDER BY start_time").fetchall()
     for row in rows:
-        sessions[row["ctftime_id"]].append(Session(row["title"], datetime.fromisoformat(row["start_time"]),
-                                                   datetime.fromisoformat(row["end_time"])))
+        sessions[row["ctftime_id"]].append(Session(row["title"], db.parse_time(row["start_time"]),
+                                                   db.parse_time(row["end_time"])))
     return dict(sorted(sessions.items()))
 
 
@@ -225,8 +225,8 @@ def _stored(ctftime_id):
         row = conn.execute("SELECT * FROM ctftime_events WHERE ctftime_id = ?", (ctftime_id,)).fetchone()
     if row is None:
         return None
-    return Record(ctftime_id, row["title"], _time(row["start"]), _time(row["finish"]), _time(row["told_start"]),
-                  _time(row["told_finish"]), bool(row["gone"]))
+    return Record(ctftime_id, row["title"], db.parse_time(row["start"]), db.parse_time(row["finish"]),
+                  db.parse_time(row["told_start"]), db.parse_time(row["told_finish"]), bool(row["gone"]))
 
 
 def _store(record, now):
@@ -236,13 +236,5 @@ def _store(record, now):
             "VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (ctftime_id) DO UPDATE SET title = excluded.title,"
             " start = excluded.start, finish = excluded.finish, checked_at = excluded.checked_at,"
             " told_start = excluded.told_start, told_finish = excluded.told_finish, gone = excluded.gone",
-            (record.ctftime_id, record.title, _text(record.start), _text(record.finish), _text(now),
-             _text(record.told_start), _text(record.told_finish), int(record.gone)))
-
-
-def _time(text):
-    return None if text is None else datetime.fromisoformat(text)
-
-
-def _text(moment):
-    return None if moment is None else moment.astimezone(timezone.utc).isoformat()
+            (record.ctftime_id, record.title, db.time_text(record.start), db.time_text(record.finish),
+             db.time_text(now), db.time_text(record.told_start), db.time_text(record.told_finish), int(record.gone)))

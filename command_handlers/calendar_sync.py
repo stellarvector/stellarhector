@@ -1,7 +1,8 @@
 # Mirrors the ICS calendar feed (ICS_URL) into the server's Discord scheduled events,
 # announcing each new event in CALENDAR_CHANNEL_ID
 # Runs by itself every ICS_POLL_MINUTES; switched off entirely when ICS_URL is not set
-# Alerts ADMIN_CHANNEL_ID once the feed has been broken for calendar_sync.FAILURES_BEFORE_ALERT syncs in a row
+# Alerts ADMIN_CHANNEL_ID once the feed has been broken for calendar_sync.FAILURES_BEFORE_ALERT syncs in a row,
+# or the sync has kept failing otherwise (Discord refusing to list the events) for as long
 # /calendar-sync runs it right away; can be run from any channel
 #   by an administrator
 import asyncio
@@ -16,6 +17,7 @@ from discord import app_commands
 from error_handlers.default import default as default_error_handler
 from error_handlers.permissions import check_role_error
 from utils import calendar_sync
+from utils.text import inline_code
 
 ICS_URL = (bot.config.get("ICS_URL") or "").strip()
 POLL_MINUTES = config_helpers.positive_int(bot.config, "ICS_POLL_MINUTES", 15)
@@ -60,16 +62,15 @@ async def sync_calendar():
             raise
 
         logging.getLogger("bot").info(f"Calendar sync done: {summary}")
-        if _health.succeeded():
-            await _alert(":white_check_mark: Calendar sync recovered.")
+        if _health.succeeded() and await _alert(":white_check_mark: Calendar sync recovered."):
+            _health.recovery_posted()
         return summary
 
 
 def _alert_message(error):
-    # Error texts can hold backticks, which would break the inline code
-    error_text = str(error).replace("`", "'")[:scheduler.ALERT_ERROR_LENGTH]
     return (f":warning: The calendar sync has been skipped {_health.failures} times in a row, so Discord events no longer"
-            f" follow the calendar. It keeps trying every {POLL_MINUTES} minutes. Last error: `{error_text}`")
+            f" follow the calendar. It keeps trying every {POLL_MINUTES} minutes."
+            f" Last error: {inline_code(str(error), scheduler.ALERT_ERROR_LENGTH)}")
 
 
 async def _alert(message):
@@ -93,7 +94,9 @@ def _ping_role(guild):
 
 
 if ICS_URL:
-    scheduler.register(scheduler.Job("calendar-sync", scheduler.every_minutes(POLL_MINUTES), run_calendar_sync))
+    # A skipped sync is alerted through _health; alert_after covers the failures that reach the scheduler
+    scheduler.register(scheduler.Job("calendar-sync", scheduler.every_minutes(POLL_MINUTES), run_calendar_sync,
+                                     alert_after=timedelta(minutes=POLL_MINUTES * calendar_sync.FAILURES_BEFORE_ALERT)))
 
 
 @bot.client.tree.command(name="calendar-sync", description="Sync the calendar into the Discord events right away", guild=bot.guild)

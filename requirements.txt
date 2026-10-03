@@ -9,3 +9,4 @@ emoji
 gitpython
 icalendar
 recurring-ical-events
+x-wr-timezone
