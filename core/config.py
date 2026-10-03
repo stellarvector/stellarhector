@@ -12,6 +12,11 @@ def role_names(config, *keys):
     return [name for name in names if name]
 
 
+def role_name(config, key):
+    """The name of the role behind the key, or None when it is not configured."""
+    return (config.get(key) or "").strip() or None
+
+
 def channel_id(config, key):
     """The channel ID behind the key, or None when it is not set, so the feature using it is off."""
     value = (config.get(key) or "").strip()

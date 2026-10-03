@@ -1,33 +1,37 @@
-# Creates a backup of a ctf category and its contents
-# Can be run from a ctf category channel
+# Creates a backup of a CTF's channels and their contents, and records that the CTF was archived
+# Can be run from the CTF's #bot channel
 #   by an administrator or manager
+from datetime import datetime, timezone
+
 import core.bot as bot
 import discord
 from discord import app_commands
+from utils import ctf_places, ctfs
 from utils.archive.ctf import CtfArchive
+from utils.ctf_places import Place
 from error_handlers.permissions import check_role_error
 from error_handlers.default import default as default_error_handler
 
 
 @bot.client.tree.command(name="archive-ctf", description="Archive a CTF", guild=bot.guild)
 @app_commands.checks.has_any_role(*bot.MANAGER_ROLES)
-@app_commands.describe(name="The CTF name (exactly)")
-async def archive_ctf(interaction: discord.Interaction, name: str):
-    await interaction.response.defer(thinking=True)
-
-    category = discord.utils.get(interaction.guild.channels, name="⚡ " + name)
-
-    if not category:
-        await interaction.edit_original_response(content=f"That CTF does not exist.")
+async def archive_ctf(interaction: discord.Interaction):
+    location = await ctf_places.locate_or_refuse(interaction, Place.BOT)
+    if location is None:
         return
 
-    channels = category.channels
+    await interaction.response.defer(thinking=True)
 
-    archive = await CtfArchive.init(name, channels)
+    ctf = location.ctf
+    category = interaction.guild.get_channel(ctf.category_id)
+    channels = ctf_places.without_bot_channel(ctf, category.channels)
+
+    archive = await CtfArchive.init(ctf.name, channels)
     archive.generate_files()
     await archive.save()
+    ctfs.mark_archived(ctf.id, datetime.now(timezone.utc))
 
-    await interaction.edit_original_response(content=f"{interaction.user.mention} archived {name}")
+    await interaction.edit_original_response(content=f"{interaction.user.mention} archived {ctf.name}")
 
 @archive_ctf.error
 async def archive_ctf_error(interaction, error):

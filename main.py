@@ -6,6 +6,7 @@ import core.config as config_helpers
 import core.db as db
 import core.events as events
 import core.scheduler as scheduler
+from utils import ctf_join
 
 
 LOAD_EVENTS = [
@@ -13,7 +14,7 @@ LOAD_EVENTS = [
 ]
 LOAD_COMMANDS = [
     "help",
-    "create_ctf",
+    "setup_ctf",
     "create_challenge",
     "add_player",
     "remove_ctf",
@@ -57,6 +58,8 @@ if __name__ == "__main__":
             if bot.channel_id(key) is None:
                 logger.warning(f"{key} is not configured, the feature using it is switched off")
         bot.init()
+        ctf_join.register(bot.client, ctf_join.JoinRoles(trusted=frozenset(bot.TRUSTED_PLAYER_ROLES),
+                                                         player=bot.PLAYER_ROLE))
         events.load(LOAD_EVENTS)
         events.register(LOAD_EVENTS)
         commands.load(LOAD_COMMANDS)

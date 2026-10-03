@@ -14,6 +14,9 @@ TIMEZONE = config_helpers.timezone(config)
 STAFF_ROLES = config_helpers.role_names(config, "ADMIN_ROLE", "MANAGER_ROLE", "MODERATOR_ROLE")
 MANAGER_ROLES = config_helpers.role_names(config, "ADMIN_ROLE", "MANAGER_ROLE")
 ADMIN_ROLES = config_helpers.role_names(config, "ADMIN_ROLE")
+# Who joins a CTF with its Join button right away, and who waits for a moderator
+TRUSTED_PLAYER_ROLES = config_helpers.role_names(config, "CORE_PLAYER_ROLE", "KNOWN_PLAYER_ROLE") + STAFF_ROLES
+PLAYER_ROLE = config_helpers.role_name(config, "PLAYER_ROLE")
 
 # Server-wide channels; a feature whose channel is None is switched off
 FEATURE_CHANNELS = [

@@ -6,21 +6,22 @@ import discord
 from utils.ctf import get_new_channel_position
 from error_handlers.permissions import check_role_error
 from error_handlers.default import default as default_error_handler
+from utils import ctf_places
+from utils.ctf_places import Place
 
 
 @bot.client.tree.command(description="Use in a challenge to indicate you have solved the challenge.", guild=bot.guild)
 @app_commands.describe(flag="The correct flag for this challenge")
 async def solved(interaction, flag: str):
-    await interaction.response.defer(thinking=True)
-
-    ctf_category = interaction.channel.category
-    ctf_role = discord.utils.get(interaction.guild.roles, name=ctf_category.name)
-
-    if not ctf_role:
-        await interaction.edit_original_response(content="This is not a ctf challenge channel, this command can only be run from a challenge channel.")
+    # TODO ctf-lifecycle 07: only in a challenge thread, once challenges are threads; until then challenge channels
+    # are what the lookup calls category channels
+    location = await ctf_places.locate_or_refuse(interaction, Place.CATEGORY)
+    if location is None:
         return
 
-    if interaction.user.get_role(ctf_role.id) is None:
+    await interaction.response.defer(thinking=True)
+
+    if interaction.user.get_role(location.ctf.role_id) is None:
         await interaction.edit_original_response(content="You are not playing this CTF so you can't mark a challenge solved.\nIf you are playing please ask an admin.")
         return
 

@@ -5,6 +5,7 @@ import core.bot as bot
 import discord
 from discord import app_commands
 from utils.archive.channel import ChannelArchive
+from utils import ctfs
 from utils.archive.ctf import CtfArchive
 from error_handlers.permissions import check_role_error
 from error_handlers.default import default as default_error_handler
@@ -54,7 +55,7 @@ async def archive_channel(interaction: discord.Interaction, channel_id: str):
         await interaction.edit_original_response(content=f"That text channel does not exist.")
         return
 
-    if channel.category and channel.category.name.startswith("⚡ "):
+    if channel.category_id is not None and ctfs.find_by_category(channel.category_id) is not None:
         await interaction.edit_original_response(content=f":no_entry: That is a CTF channel, use `/archive-ctf` instead.")
         return
 

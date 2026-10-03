@@ -6,20 +6,21 @@ from discord import app_commands
 from utils.ctf import get_new_channel_position
 from error_handlers.permissions import check_role_error
 from error_handlers.default import default as default_error_handler
+from utils import ctf_places
+from utils.ctf_places import Place
 
 
 @bot.client.tree.command(description="Use in a challenge to revert the solving of the challenge.", guild=bot.guild)
 @app_commands.checks.has_any_role(*bot.MANAGER_ROLES)
 async def unsolve(interaction):
+    # TODO ctf-lifecycle 07: only in a challenge thread, once challenges are threads; until then challenge channels
+    # are what the lookup calls category channels
+    location = await ctf_places.locate_or_refuse(interaction, Place.CATEGORY)
+    if location is None:
+        return
+
     await interaction.response.defer(thinking=True)
     message_id = interaction.channel.last_message_id
-
-    ctf_category = interaction.channel.category
-    ctf_role = discord.utils.get(interaction.guild.roles, name=ctf_category.name)
-
-    if not ctf_role:
-        await interaction.edit_original_response(content="This is not a ctf challenge channel, this command can only be run from a challenge channel.")
-        return
 
     if "solved" not in interaction.channel.name:
         await interaction.edit_original_response(content="This challenge is not solved.\nIn order to mark a challenge as unsolved it should have been marked as solved.")

@@ -20,9 +20,9 @@ All settings live in `.env`; see `.env.example` for the full list.
 Role names (not IDs), as they appear on the server:
 
 - `ADMIN_ROLE`: admins (e.g. `sv{admin}`).
-- `MANAGER_ROLE`: managers (e.g. `sv{manager}`), may run the CTF management commands (create, release, archive and remove CTFs, add and remove players, unsolve challenges, archive channels, post the CTFtime table).
-- `MODERATOR_ROLE`: moderators (e.g. `sv{moderator}`).
-- `CORE_PLAYER_ROLE`, `KNOWN_PLAYER_ROLE`, `PLAYER_ROLE`: the player tiers.
+- `MANAGER_ROLE`: managers (e.g. `sv{manager}`), may run the CTF management commands (set up, release, archive and remove CTFs, add and remove players, unsolve challenges, archive channels, post the CTFtime table).
+- `MODERATOR_ROLE`: moderators (e.g. `sv{moderator}`), may add and remove players of a CTF.
+- `CORE_PLAYER_ROLE`, `KNOWN_PLAYER_ROLE`, `PLAYER_ROLE`: the player tiers. Core and known players (and staff) join a CTF with its Join button right away; players wait for a moderator; anyone else can't join that way.
 - `MEMBER_ROLE`: every member of the team.
 
 In code, `bot.STAFF_ROLES` (admin, manager, moderator), `bot.MANAGER_ROLES` (admin, manager) and `bot.ADMIN_ROLES` (admin) are the role groups commands check with `@app_commands.checks.has_any_role(*bot.MANAGER_ROLES)`. Roles that are not set are left out.
@@ -33,7 +33,7 @@ Channel IDs (right-click the channel with developer mode on, then "Copy Channel 
 
 - `ADMIN_CHANNEL_ID`: shared admin channel for all bot alerts (feed failures, CTFtime changes before a CTF is set up, removal reminders).
 - `CTF_SELECTION_CHANNEL_ID`: #ctf-selection.
-- `UPCOMING_CTFS_CHANNEL_ID`: #upcoming-ctfs.
+- `UPCOMING_CTFS_CHANNEL_ID`: #upcoming-ctfs, where each CTF's join message is posted.
 - `CALENDAR_CHANNEL_ID`: calendar announcements (see [Calendar sync](#calendar-sync)).
 - `LEARNING_FORUM_ID`: the #learning forum, where new blog posts are shared.
 
@@ -84,6 +84,48 @@ The lines are built by `utils/ctftime_table.py`; `post_table` posts it, so the m
 ### Monthly post
 
 On the 1st of every month at 10:00 `TIMEZONE`, the `monthly-ctftime-table` job posts what `/ctftime-table` posts with its defaults (next month to validate, the month after as a preview). If CTFtime can't be reached it is retried every tick, and after a day of failing one alert is posted in `ADMIN_CHANNEL_ID`. If Discord refuses a message, the table may be half posted, so it is not retried: an alert is posted in `ADMIN_CHANNEL_ID` straight away to run `/ctftime-table` by hand. Nothing is posted when `CTF_SELECTION_CHANNEL_ID` is not set.
+
+## CTFs
+
+Every CTF the bot set up is a row in the `ctfs` table: its name, its CTFtime ID with that event's start and finish (empty for a CTF without one), the IDs of its role, category, main channel, #bot channel, guide message and join message, and when each lifecycle step was done (last call, release, lock, archive, removal reminder, removed). A removed CTF keeps its row. The table is read and written through `utils/ctfs.py`.
+
+### `/setup-ctf <name> [ctftime-id]`
+
+Admins and managers can run it in any channel. It creates:
+
+- the role `⚡ <name>` (color `CTF_ROLE_COLOR_HEX`, mentionable, just above `MEMBER_ROLE`);
+- the category `⚡ <name>`, hidden from @everyone and members, visible to the CTF role, admins, managers and moderators (admins can also manage its channels);
+- the main channel `<name>` at the top of the category, synced to it. Its first message is a pinned guide on how to work with the bot in this CTF, with a **Leave** button; its text is `utils/templates/ctf_guide.md`;
+- the `#bot` channel, only visible to admins, managers and moderators. Staff run the CTF's commands there, and the bot posts the CTF's alerts there;
+- the join message in `UPCOMING_CTFS_CHANNEL_ID` (skipped when that is not set), see [Joining a CTF](#joining-a-ctf).
+
+The bot also gives itself access to the category and #bot, so it can post and pin there without Administrator.
+
+With a CTFtime ID the event's start and finish are fetched from CTFtime and stored; the name stays what was typed. It is refused, and nothing is created, when CTFtime does not know the event or can't be reached, or when a CTF that is not removed already has that name (ignoring case) or CTFtime ID; the reply links to the existing CTF. When Discord refuses one of the steps halfway, what was created is deleted again and nothing is stored. The setup itself is `setup_ctf()` in `utils/ctf_setup.py`.
+
+### Joining a CTF
+
+The join message shows the CTF's name, CTFtime link, start and finish, the on-campus sessions on the calendar that link to its CTFtime event (see [Calendar sync](#calendar-sync)), and who plays (the first 20 by name, then "and N more"). It is kept up to date whenever someone joins or leaves, also through `/add-player` and `/remove-player`.
+
+Its **Join** button, answered only to whoever clicks it:
+
+- core players, known players and staff get the CTF role and are on the player list right away;
+- players are put on the list as `pending`, and a card in the CTF's #bot asks a moderator to let them in with `/add-player`; clicking again while pending posts no second card;
+- anyone else is told to ask a moderator;
+- once the CTF is released or locked, joining is closed.
+
+The **Leave** button on the guide takes the CTF role away and takes the player off the list. Both buttons keep working after a restart: their `custom_id` holds the CTF's ID (`ctf:join:<id>`, `ctf:leave:<id>`), and `ctf_join.register()` handles them for every CTF at startup. The logic is in `utils/ctf_join.py`.
+
+### Where CTF commands run
+
+Commands find their CTF from the channel they are run in, by the IDs in `ctfs`, so renaming a CTF's channels, category or role by hand breaks nothing. `locate()` in `utils/ctf_places.py` tells what the channel is: the CTF's main channel, its #bot, a category channel (any other channel in its category), a challenge thread (a thread in a category channel), or not a place in a CTF. Run in the wrong place, a command replies, only to the user, where to run it.
+
+- `/add-player <player>`, `/remove-player <player>`: admins, managers and moderators, in #bot. They give or take away the CTF role and put the player on, or take them off, the CTF's player list (the `ctf_players` table: CTF, user, `joined` or `pending`, approval card message, joined at).
+- `/release-ctf`: admins and managers, in #bot. #bot stays visible to staff only.
+- `/archive-ctf`: admins and managers, in #bot. Archives the CTF's channels, except #bot, and records when it was archived.
+- `/remove-ctf [force]`: admins and managers, in #bot. Refused when the CTF was never archived, unless `force` is set. Deletes the CTF's channels and role, then #bot and the category, and marks it removed. When a channel or the role can't be deleted it stops before #bot, so it can be run again; once #bot is gone the admins are told in `ADMIN_CHANNEL_ID`.
+- `/create-challenge`: players of the CTF, in its main channel, a challenge channel or a challenge thread.
+- `/solved`, `/unsolve`: in a challenge channel (for now a category channel, until challenges become threads).
 
 ## Calendar sync
 
