@@ -62,7 +62,7 @@ async def archive_channel(interaction: discord.Interaction, channel_id: str):
         return
 
     # Sync the archive repository so the check sees the latest archives
-    _ = CtfArchive.get_archive_repository()
+    _ = await CtfArchive.sync_repository()
 
     category = ChannelArchive.category_folder(channel)
     archive_name = ChannelArchive.channel_folder(channel)
@@ -82,7 +82,7 @@ async def archive_channel(interaction: discord.Interaction, channel_id: str):
 
     archive = await ChannelArchive.init(channel)
     archive.generate_files(overwrite)
-    archive.save()
+    await archive.save()
 
     await interaction.edit_original_response(content=f"{interaction.user.mention} archived {channel.mention} as `{archive.category}/{archive.archive_name}`")
 

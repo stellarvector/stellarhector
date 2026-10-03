@@ -1,5 +1,6 @@
 from utils.archive.challenge import ChallengeArchive
 from git import Repo
+import asyncio
 import datetime
 import core.bot as bot
 import os
@@ -10,7 +11,7 @@ class CtfArchive():
         self = CtfArchive()
 
         # First sync archive repository
-        _ = self.get_archive_repository()
+        _ = await CtfArchive.sync_repository()
 
         self.name = ctf
         self.year = datetime.datetime.now().year
@@ -96,7 +97,10 @@ class CtfArchive():
             year_html = year_html.replace("<!--add-ctf-->", ctf_link_html)
             year_file.write(year_html)
 
-    def save(self):
+    async def save(self):
+        await asyncio.to_thread(self._save)
+
+    def _save(self):
         repository = CtfArchive.get_archive_repository()
         if int(bot.config.get("SHOULD_COMMIT")):
             repository = Repo(bot.config.get("ARCHIVE_LOCAL_PATH"))
@@ -106,6 +110,12 @@ class CtfArchive():
             if int(bot.config.get("SHOULD_PUSH")):
                 origin = repository.remote(name="origin")
                 origin.push()
+
+    # git clone, pull and push can take a while; they run in a thread so the event loop
+    # (and with it the scheduler heartbeat) keeps going
+    @staticmethod
+    async def sync_repository():
+        return await asyncio.to_thread(CtfArchive.get_archive_repository)
 
     @staticmethod
     def get_archive_repository():

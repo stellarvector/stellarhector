@@ -1,9 +1,11 @@
 import logging
+from datetime import timedelta
 from logging.handlers import RotatingFileHandler
 import core.bot as bot
 import core.commands as commands
 import core.db as db
 import core.events as events
+import core.scheduler as scheduler
 
 
 LOAD_EVENTS = [
@@ -45,6 +47,8 @@ if __name__ == "__main__":
 
     try:
         db.init(bot.config.get("DATABASE_PATH") or db.DEFAULT_PATH)
+        watchdog_minutes = bot.config.get("WATCHDOG_TIMEOUT_MINUTES")
+        scheduler.init(timedelta(minutes=int(watchdog_minutes)) if watchdog_minutes else scheduler.DEFAULT_WATCHDOG_LIMIT)
         bot.init()
         events.load(LOAD_EVENTS)
         events.register(LOAD_EVENTS)

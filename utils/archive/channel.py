@@ -1,6 +1,7 @@
 from utils.archive.challenge import ChallengeArchive
 from utils.archive.ctf import CtfArchive
 from utils.archive.naming import normalize_name
+import asyncio
 import core.bot as bot
 import discord
 import os
@@ -15,7 +16,7 @@ class ChannelArchive():
         self = ChannelArchive()
 
         # First sync archive repository
-        _ = CtfArchive.get_archive_repository()
+        _ = await CtfArchive.sync_repository()
 
         self.name = channel.name
         self.category = ChannelArchive.category_folder(channel)
@@ -112,7 +113,10 @@ class ChannelArchive():
             channels_html = channels_html.replace("<!--add-channel-->", channel_link_html)
             channels_file.write(channels_html)
 
-    def save(self):
+    async def save(self):
+        await asyncio.to_thread(self._save)
+
+    def _save(self):
         repository = CtfArchive.get_archive_repository()
         if int(bot.config.get("SHOULD_COMMIT")):
             # --all also stages files removed by overwriting an archived channel

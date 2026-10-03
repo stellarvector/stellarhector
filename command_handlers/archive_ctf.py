@@ -28,7 +28,7 @@ async def archive_ctf(interaction: discord.Interaction, name: str):
 
     archive = await CtfArchive.init(name, channels)
     archive.generate_files()
-    archive.save()
+    await archive.save()
 
     await interaction.edit_original_response(content=f"{interaction.user.mention} archived {name}")
 
