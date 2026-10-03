@@ -49,6 +49,9 @@ if __name__ == "__main__":
         db.init(bot.config.get("DATABASE_PATH") or db.DEFAULT_PATH)
         watchdog_minutes = bot.config.get("WATCHDOG_TIMEOUT_MINUTES")
         scheduler.init(timedelta(minutes=int(watchdog_minutes)) if watchdog_minutes else scheduler.DEFAULT_WATCHDOG_LIMIT)
+        for key in bot.FEATURE_CHANNELS:
+            if bot.channel_id(key) is None:
+                logger.warning(f"{key} is not configured, the feature using it is switched off")
         bot.init()
         events.load(LOAD_EVENTS)
         events.register(LOAD_EVENTS)

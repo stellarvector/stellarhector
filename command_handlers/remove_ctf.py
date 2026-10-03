@@ -7,10 +7,7 @@ from error_handlers.permissions import check_role_error
 from error_handlers.default import default as default_error_handler
 
 @bot.client.tree.command(name="remove-ctf", description="Remove a CTF (PERMANENTLY)", guild=bot.guild)
-@app_commands.checks.has_any_role(
-    bot.config.get("ADMIN_ROLE"),
-    bot.config.get("CTF_OPERATOR_ROLE")
-)
+@app_commands.checks.has_any_role(*bot.MANAGER_ROLES)
 @app_commands.describe(name="The CTF name (exactly)")
 async def remove_ctf(interaction: discord.Interaction, name: str):
     await interaction.response.defer(thinking=True)

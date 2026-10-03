@@ -1,5 +1,5 @@
 # Sets the name back to the original and sorts the challenges
-# Can be run in a solved challenge by an admin or ctf-operator.
+# Can be run in a solved challenge by an admin or manager.
 import core.bot as bot
 import discord
 from discord import app_commands
@@ -9,10 +9,7 @@ from error_handlers.default import default as default_error_handler
 
 
 @bot.client.tree.command(description="Use in a challenge to revert the solving of the challenge.", guild=bot.guild)
-@app_commands.checks.has_any_role(
-    bot.config.get("ADMIN_ROLE"),
-    bot.config.get("CTF_OPERATOR_ROLE")
-)
+@app_commands.checks.has_any_role(*bot.MANAGER_ROLES)
 async def unsolve(interaction):
     await interaction.response.defer(thinking=True)
     message_id = interaction.channel.last_message_id

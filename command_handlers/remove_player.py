@@ -1,6 +1,6 @@
 # Removes a member from the role for this ctf
 # Can be run from a ctf category channel
-#   by an administrator or ctf operator
+#   by an administrator or manager
 import core.bot as bot
 import discord
 from discord import app_commands
@@ -10,10 +10,7 @@ from error_handlers.default import default as default_error_handler
 
 @bot.client.tree.command(name="remove-player", description="Remove a player from a ctf", guild=bot.guild)
 @app_commands.describe(player="Player")
-@app_commands.checks.has_any_role(
-    bot.config.get("ADMIN_ROLE"),
-    bot.config.get("CTF_OPERATOR_ROLE")
-)
+@app_commands.checks.has_any_role(*bot.MANAGER_ROLES)
 async def add_player(interaction, player: discord.Member):
     await interaction.response.defer(thinking=True, ephemeral=True)
 

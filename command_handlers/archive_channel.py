@@ -1,6 +1,6 @@
 # Creates a backup of a regular (non-ctf) channel and its contents
 # Can be run from any channel
-#   by an administrator or ctf operator
+#   by an administrator or manager
 import core.bot as bot
 import discord
 from discord import app_commands
@@ -38,10 +38,7 @@ class ArchiveConflictView(discord.ui.View):
 
 
 @bot.client.tree.command(name="archive-channel", description="Archive a regular (non-CTF) channel", guild=bot.guild)
-@app_commands.checks.has_any_role(
-    bot.config.get("ADMIN_ROLE"),
-    bot.config.get("CTF_OPERATOR_ROLE")
-)
+@app_commands.checks.has_any_role(*bot.MANAGER_ROLES)
 @app_commands.describe(channel_id="The ID of the channel to archive")
 async def archive_channel(interaction: discord.Interaction, channel_id: str):
     await interaction.response.defer(thinking=True)

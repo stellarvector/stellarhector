@@ -15,6 +15,33 @@ That's all!
 
 All settings live in `.env`; see `.env.example` for the full list.
 
+### Roles
+
+Role names (not IDs), as they appear on the server:
+
+- `ADMIN_ROLE`: admins (e.g. `sv{admin}`).
+- `MANAGER_ROLE`: managers (e.g. `sv{manager}`), may run the CTF management commands (create, release, archive and remove CTFs, add and remove players, unsolve challenges, archive channels).
+- `MODERATOR_ROLE`: moderators (e.g. `sv{moderator}`).
+- `CORE_PLAYER_ROLE`, `KNOWN_PLAYER_ROLE`, `PLAYER_ROLE`: the player tiers.
+- `MEMBER_ROLE`: every member of the team.
+
+In code, `bot.STAFF_ROLES` (admin, manager, moderator) and `bot.MANAGER_ROLES` (admin, manager) are the role groups commands check with `@app_commands.checks.has_any_role(*bot.MANAGER_ROLES)`. Roles that are not set are left out.
+
+### Channels
+
+Channel IDs (right-click the channel with developer mode on, then "Copy Channel ID"). A feature whose channel ID is not set is switched off: its job does nothing and its command replies that it is not configured. The bot logs a warning at startup for each one that is missing, and starts normally.
+
+- `ADMIN_CHANNEL_ID`: shared admin channel for all bot alerts (feed failures, CTFtime changes before a CTF is set up, removal reminders).
+- `CTF_SELECTION_CHANNEL_ID`: #ctf-selection.
+- `UPCOMING_CTFS_CHANNEL_ID`: #upcoming-ctfs.
+- `CALENDAR_CHANNEL_ID`: calendar announcements.
+- `LEARNING_FORUM_ID`: the #learning forum, where new blog posts are shared.
+
+Features read these with `bot.channel_id("ADMIN_CHANNEL_ID")`, which returns `None` when the ID is not set.
+
+### Other settings
+
+- `TIMEZONE`: timezone used wherever times are shown or scheduled (default `Europe/Brussels`).
 - `DATABASE_PATH`: SQLite database file holding all bot state (default `./data/stellarhector.db`). Keep it under `./data`, which is mounted into the container, so it survives `docker-compose down && up`. The bot creates it on first start and applies any new migrations (`core/migrations/`) on every start.
 - `WATCHDOG_TIMEOUT_MINUTES`: how long the scheduler may go without a tick before the watchdog restarts the bot (default `20`, must be more than the 5-minute tick interval).
 
