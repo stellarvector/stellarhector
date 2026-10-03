@@ -26,6 +26,7 @@ LOAD_COMMANDS = [
     "ctftime_table",
     "calendar_sync",
     "ctftime_check",
+    "blog_check",
 ]
 
 

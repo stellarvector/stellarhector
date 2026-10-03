@@ -16,6 +16,7 @@ These are the commands I understand:
 For admins:
 `/calendar-sync` - Sync the calendar into the Discord events right away, instead of waiting for the next automatic sync.
 `/ctftime-check` - Check the CTFs on the calendar for date changes on CTFtime right away, instead of waiting for the daily check.
+`/blog-check` - Share the new posts on Stellar Vector's blog in #learning right away.
 
 In order to do one of the following things, **ask an admin**:
 * You really want to join in playing this CTF, but have not been added yet.

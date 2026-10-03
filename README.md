@@ -140,3 +140,20 @@ Alerts go to `ADMIN_CHANNEL_ID`. Alerts list at most 5 sessions, to stay within 
 ### `/ctftime-check`
 
 Admins (`ADMIN_ROLE`) can run it in any channel to run the daily check right away (waiting for a check that is running). It replies, only to the admin, with how many CTFs were checked and how many alerts were posted, and how many CTFs were skipped because CTFtime could not be reached.
+
+## Blog feed
+
+On every check, new posts on [Stellar Vector's blog](https://blog.stellarvector.be/) are shared as forum posts in `LEARNING_FORUM_ID` (#learning). Without `LEARNING_FORUM_ID` the feature is off.
+
+The check downloads the blog's RSS feed (`https://blog.stellarvector.be/index.xml`) and creates a forum post for every item whose `guid` is not in the `blog_posts_seen` table yet, oldest first. The very first check (empty table) only records the items that are already there and posts nothing, so the blog's history is not posted.
+
+- A writeup (a link under `/writeups/<year>/<ctf-slug>/`) gets the title `[SV writeup] <CTF> / <title>` and the tags `writeup` and `Stellar Vector`. The CTF is the item's `<category domain="ctf">` when it has one, else the CTF slug from the link in title case.
+- Any other post gets the title `[SV blog] <title>` and the tag `Stellar Vector`.
+- Titles are cut to Discord's 100 characters. The post says what it is, followed by the item's description (when it has one) and the link.
+- Tags are looked up on the forum by name, ignoring case. A tag the forum doesn't have is left out with a logged warning; the bot never creates tags.
+
+A feed that can't be downloaded or parsed changes nothing and is logged. A forum post that can't be created is logged, and its item is tried again on the next check. The check itself is `check()` in `utils/blog_feed.py`.
+
+### `/blog-check`
+
+Admins (`ADMIN_ROLE`) can run it in any channel to run the check right away. It replies, only to the admin, with how many forum posts were created.
