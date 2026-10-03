@@ -49,6 +49,9 @@ def parse_start_month(value, today):
     year, month = match.group(1), int(match.group(2))
 
     if year is not None:
+        # The month after the last listed one must still be a valid datetime, for up to 12 months
+        if not datetime.min.year <= int(year) <= datetime.max.year - 1:
+            raise ValueError(_INVALID_MONTH.format(value))
         return int(year), month
     return (today.year if month >= today.month else today.year + 1), month
 
@@ -150,6 +153,7 @@ async def post_table(channel, start, count, tz, list_events=ctftime.list_events)
     """Post the table for count months from start, as (year, month), in channel. Returns how many CTFs it lists.
 
     Raises CtftimeError, before anything is posted, when CTFtime can't be reached.
+    A discord.HTTPException may come after some messages are already posted.
     """
     month_list = months(start, count)
     events = await list_events(*date_range(month_list, tz))

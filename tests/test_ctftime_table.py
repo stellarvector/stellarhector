@@ -59,6 +59,15 @@ class ParseStartMonthTest(unittest.TestCase):
             with self.subTest(value=value), self.assertRaises(ValueError):
                 ctftime_table.parse_start_month(value, date(2026, 10, 3))
 
+    def test_year_out_of_range(self):
+        for value in ["0000-05", "9999-01"]:
+            with self.subTest(value=value), self.assertRaises(ValueError):
+                ctftime_table.parse_start_month(value, date(2026, 10, 3))
+
+    def test_last_supported_year_has_a_date_range(self):
+        start = ctftime_table.parse_start_month("9998-12", date(2026, 10, 3))
+        ctftime_table.date_range(ctftime_table.months(start, 12), TZ)
+
 
 class MonthsTest(unittest.TestCase):
     def test_runs_over_the_year_end(self):

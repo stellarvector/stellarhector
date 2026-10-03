@@ -26,6 +26,9 @@ FEATURE_CHANNELS = [
 def channel_id(key):
     return config_helpers.channel_id(config, key)
 
+async def channel(discord_id):
+    return client.get_channel(discord_id) or await client.fetch_channel(discord_id)
+
 async def alert_admins(message):
     """Post message in ADMIN_CHANNEL_ID, or only log it when that channel is not configured."""
     admin_channel_id = channel_id("ADMIN_CHANNEL_ID")
@@ -33,8 +36,8 @@ async def alert_admins(message):
         logging.getLogger("bot").warning(f"ADMIN_CHANNEL_ID is not configured, alert not posted: {message}")
         return
 
-    channel = client.get_channel(admin_channel_id) or await client.fetch_channel(admin_channel_id)
-    await channel.send(message, allowed_mentions=discord.AllowedMentions.none())
+    admin_channel = await channel(admin_channel_id)
+    await admin_channel.send(message, allowed_mentions=discord.AllowedMentions.none())
 
 jinja_env = Environment(
     loader=PackageLoader("utils", "templates"),

@@ -4,6 +4,7 @@
 # Also posted by itself on the 1st of every month, with the defaults
 import logging
 from datetime import datetime, timedelta
+from typing import Optional
 from zoneinfo import ZoneInfo
 
 import core.bot as bot
@@ -25,7 +26,15 @@ async def post_monthly_table():
         return
 
     start = ctftime_table.parse_start_month(None, _today())
-    await ctftime_table.post_table(await _channel(channel_id), start, DEFAULT_MONTHS, bot.TIMEZONE)
+    try:
+        await ctftime_table.post_table(await bot.channel(channel_id), start, DEFAULT_MONTHS, bot.TIMEZONE)
+    except discord.HTTPException as e:
+        # Part of the table may be posted already, so a retry could post it twice: tell the admins instead
+        logging.getLogger("bot").error(f"Monthly CTFtime table could not be posted: {e}")
+        try:
+            await bot.alert_admins(f":warning: The monthly CTFtime table could not be (fully) posted in <#{channel_id}>, run /ctftime-table to post it: {e}")
+        except discord.HTTPException as alert_error:
+            logging.getLogger("bot").error(f"Alert about the monthly CTFtime table could not be posted: {alert_error}")
 
 
 scheduler.register(scheduler.Job(
@@ -42,7 +51,7 @@ scheduler.register(scheduler.Job(
 @app_commands.describe(
     start_month="First month, as a month number (11) or YYYY-MM (2026-11); next month when left out",
     months=f"How many months to list; {DEFAULT_MONTHS} when left out")
-async def ctftime_table_command(interaction: discord.Interaction, start_month: str = None,
+async def ctftime_table_command(interaction: discord.Interaction, start_month: Optional[str] = None,
                                 months: app_commands.Range[int, 1, 12] = DEFAULT_MONTHS):
     channel_id = bot.channel_id("CTF_SELECTION_CHANNEL_ID")
     if channel_id is None:
@@ -57,7 +66,7 @@ async def ctftime_table_command(interaction: discord.Interaction, start_month: s
 
     await interaction.response.defer(thinking=True, ephemeral=True)
 
-    channel = await _channel(channel_id)
+    channel = await bot.channel(channel_id)
     try:
         count = await ctftime_table.post_table(channel, start, months, bot.TIMEZONE)
     except CtftimeError as e:
@@ -77,7 +86,3 @@ async def error_on_ctftime_table_command(interaction, error):
 
 def _today():
     return datetime.now(ZoneInfo(bot.TIMEZONE)).date()
-
-
-async def _channel(channel_id):
-    return bot.client.get_channel(channel_id) or await bot.client.fetch_channel(channel_id)
