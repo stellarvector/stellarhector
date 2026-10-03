@@ -70,6 +70,12 @@ def find(name=None, ctftime_id=None):
     return None if row is None else _ctf(row)
 
 
+def ever_set_up(ctftime_id):
+    """Whether a CTF with this CTFtime ID was set up, also when it is removed since."""
+    with db.transaction() as conn:
+        return conn.execute("SELECT 1 FROM ctfs WHERE ctftime_id = ?", (ctftime_id,)).fetchone() is not None
+
+
 def find_by_category(category_id):
     """The CTF that is not removed whose Discord category has this ID, or None."""
     with db.transaction() as conn:
@@ -83,6 +89,22 @@ def managed():
     with db.transaction() as conn:
         rows = conn.execute("SELECT * FROM ctfs WHERE removed_at IS NULL ORDER BY start IS NULL, start, id").fetchall()
     return [_ctf(row) for row in rows]
+
+
+def ctftime_ids_not_locked():
+    """The CTFtime IDs of the CTFs that are not removed or locked: their dates may still change the steps to run."""
+    with db.transaction() as conn:
+        rows = conn.execute("SELECT ctftime_id FROM ctfs WHERE removed_at IS NULL AND locked_at IS NULL"
+                            " AND ctftime_id IS NOT NULL ORDER BY ctftime_id").fetchall()
+    return [row["ctftime_id"] for row in rows]
+
+
+def set_dates(ctftime_id, start, finish):
+    """Store the start and finish CTFtime has now on the CTF with this CTFtime ID that is not removed, if there is
+    one."""
+    with db.transaction() as conn:
+        conn.execute("UPDATE ctfs SET start = ?, finish = ? WHERE ctftime_id = ? AND removed_at IS NULL",
+                     (db.time_text(start), db.time_text(finish), ctftime_id))
 
 
 def set_join_message(ctf_id, channel_id, message_id):
@@ -115,6 +137,12 @@ def mark_locked(ctf_id, at):
         cursor = conn.execute("UPDATE ctfs SET locked_at = ? WHERE id = ? AND locked_at IS NULL",
                               (db.time_text(at), ctf_id))
         return cursor.rowcount == 1
+
+
+def mark_removal_reminded(ctf_id, at):
+    """Remember that the admins were reminded at the time at to remove the CTF."""
+    with db.transaction() as conn:
+        conn.execute("UPDATE ctfs SET removal_reminded_at = ? WHERE id = ?", (db.time_text(at), ctf_id))
 
 
 def set_overview_message(ctf_id, message_id):

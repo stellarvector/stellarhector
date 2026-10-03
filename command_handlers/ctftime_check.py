@@ -1,5 +1,5 @@
-# Checks the CTFs that calendar sessions link to on CTFtime, and alerts ADMIN_CHANNEL_ID when their dates changed
-# or they are gone from CTFtime
+# Checks the CTFs that calendar sessions link to, and those set up and not locked, on CTFtime, and alerts the CTF's
+# #bot (ADMIN_CHANNEL_ID before it is set up) when their dates changed or they are gone from CTFtime
 # Runs by itself every day at 12:00 TIMEZONE
 # /ctftime-check runs it right away; can be run from any channel
 #   by an administrator
@@ -13,7 +13,7 @@ import discord
 from discord import app_commands
 from error_handlers.default import default as default_error_handler
 from error_handlers.permissions import check_role_error
-from utils import ctftime_check
+from utils import ctfs, ctftime_check
 
 # Every CTF is one CTFtime request of at most 30 seconds, so give a handful of slow ones room
 TIMEOUT = timedelta(minutes=10)
@@ -32,9 +32,9 @@ async def check_ctftime():
 
 
 async def _alert(ctftime_id, message):
-    """Post message about the CTF with ctftime_id for the admins."""
-    # TODO ctf-lifecycle: post in the CTF's #bot channel once the CTF is set up
-    await asyncio.wait_for(bot.alert_admins(message), timeout=scheduler.ALERT_TIMEOUT.total_seconds())
+    """Post message about the CTF with ctftime_id in its #bot once it is set up, else for the admins."""
+    await asyncio.wait_for(bot.alert_ctf(ctfs.find(ctftime_id=ctftime_id), message),
+                           timeout=scheduler.ALERT_TIMEOUT.total_seconds())
 
 
 scheduler.register(scheduler.Job("ctftime-check", scheduler.daily_at("12:00", bot.TIMEZONE), check_ctftime, timeout=TIMEOUT))

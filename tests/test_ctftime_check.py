@@ -5,7 +5,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from core import db
-from utils import calendar_sync, ctftime_check
+from tests.test_ctfs import new_ctf
+from utils import calendar_sync, ctfs, ctftime_check
 from utils.calendar_sync import Occurrence
 from utils.ctftime import CtftimeError, Event
 from utils.ctftime_check import Record, Session
@@ -357,6 +358,31 @@ class CheckTest(unittest.IsolatedAsyncioTestCase):
         result = await self.check(ctftime)
 
         self.assertEqual((result.checked, ctftime.asked), (0, []))
+
+    def set_up_ctf(self, ctftime_id=3352, locked=False):
+        ctf = ctfs.create(new_ctf(name=f"CTF {ctftime_id}", ctftime_id=ctftime_id, start=CTF_START,
+                                  finish=CTF_FINISH))
+        if locked:
+            ctfs.mark_locked(ctf.id, NOW)
+        return ctf
+
+    async def test_changed_dates_are_stored_on_the_ctf_that_is_set_up(self):
+        self.add_session("night")
+        self.set_up_ctf()
+
+        await self.check(FakeCtftime({3352: event(start=NEW_START, finish=NEW_FINISH)}))
+
+        stored = ctfs.find(ctftime_id=3352)
+        self.assertEqual((stored.start, stored.finish), (NEW_START, NEW_FINISH))
+
+    async def test_a_ctf_set_up_and_not_locked_is_checked_without_a_session_left(self):
+        self.set_up_ctf(1)
+        self.set_up_ctf(2, locked=True)
+        ctftime = FakeCtftime({1: event()})
+
+        result = await self.check(ctftime)
+
+        self.assertEqual((result.checked, ctftime.asked), (1, [1]))
 
 
 if __name__ == "__main__":

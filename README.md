@@ -31,7 +31,7 @@ In code, `bot.STAFF_ROLES` (admin, manager, moderator), `bot.MANAGER_ROLES` (adm
 
 Channel IDs (right-click the channel with developer mode on, then "Copy Channel ID"). A feature whose channel ID is not set is switched off: its job does nothing and its command replies that it is not configured. The bot logs a warning at startup for each one that is missing, and starts normally.
 
-- `ADMIN_CHANNEL_ID`: shared admin channel for all bot alerts (feed failures, CTFtime changes before a CTF is set up, removal reminders).
+- `ADMIN_CHANNEL_ID`: shared admin channel for all bot alerts (feed failures, CTFtime changes before a CTF is set up, failing automatic setups, removal reminders).
 - `CTF_SELECTION_CHANNEL_ID`: #ctf-selection.
 - `UPCOMING_CTFS_CHANNEL_ID`: #upcoming-ctfs, where each CTF's join message is posted.
 - `CALENDAR_CHANNEL_ID`: calendar announcements (see [Calendar sync](#calendar-sync)).
@@ -138,8 +138,29 @@ Commands find their CTF from the channel they are run in, by the IDs in `ctfs`, 
 - `/create-challenge <name>`: players of the CTF and admins, managers and moderators, in a category channel, or in a challenge thread (then its parent channel is used). Anywhere else, also in a channel of the CTF's category not made with `/add-category`, it says to run it in a category channel and to create one with `/add-category`. The name is slugified like a category. A new challenge gets a starter message in the category channel ("🧩 `<slug>`, started by @user", pinging nobody) with a public thread on it named after the slug, which auto-archives after a week, Discord's maximum; the user is added to it and gets a link. A challenge the category already has (by slug, so also once solved and renamed) gets no new thread: the user is added to the existing one, unarchived first if needed, and pointed there. A thread deleted by hand is made again. The challenges are stored in the `ctf_challenges` table (CTF, category slug, slug, thread, solved). The logic is in `utils/ctf_challenges.py`.
 - `/solved <flag>`: players of the CTF (with its role), in a challenge thread made with `/create-challenge`; anywhere else, also in another thread, it says to run it in a challenge thread. The thread is renamed to `✅ <slug>` and stays open (people often keep talking after a solve), the solve message with the flag is posted in it, and the challenge is stored as solved. A challenge that is solved already is left as it is and the user told so.
 - `/unsolve`: admins, managers and moderators, in a challenge thread. Renames the thread back to `<slug>` and stores the challenge as unsolved; a challenge that is not solved is left as it is.
-- `/ctf-status`: admins, managers and moderators, anywhere; only they see the reply. One line per CTF that is not removed, by start (CTFs without dates last): its name linking to its main channel, its CTFtime link and start and finish (when it has a CTFtime ID), its stage (set up, released, locked or archived; locked means its archive failed), its next automatic step and when, or "manual" for a CTF without a CTFtime ID, and how many players joined and are pending. The lines are split over messages to stay under Discord's 2000 characters. The next step comes from `plan()` in `utils/ctf_timeline.py`: the steps still to run (last call at start − 1 day, release at finish + 1 day, lock and archive at finish + 5 days, the removal reminder 4 weeks after that), leaving out steps already done (also by command), a last call once the CTF started and a release once it is locked. The text is built by `utils/ctf_status.py`.
+- `/ctf-status`: admins, managers and moderators, anywhere; only they see the reply. One line per CTF that is not removed, by start (CTFs without dates last): its name linking to its main channel, its CTFtime link and start and finish (when it has a CTFtime ID), its stage (set up, released, locked or archived; locked means its archive failed), its next automatic step and when, or "manual" for a CTF without a CTFtime ID, and how many players joined and are pending. The lines are split over messages to stay under Discord's 2000 characters. The next step comes from `plan()` in `utils/ctf_timeline.py`, the plan of [the automatic timeline](#the-automatic-timeline). The text is built by `utils/ctf_status.py`.
 - The challenge overview: one message in the CTF's main channel, posted and pinned when its first challenge is created, its ID stored on the `ctfs` row (`overview_message_id`). Under a mention of each category channel it mentions every challenge thread, so it shows the thread's live name, with ✅ once solved. It is edited when a challenge is created, solved or unsolved; deleted by hand, it is posted and pinned again. When it doesn't fit in one message (2000 characters), the last challenges are left out and it ends with "… and N more". The logic is in `utils/ctf_overview.py`.
+
+### The automatic timeline
+
+For a CTF with a CTFtime ID, the `ctf-timeline` job runs every lifecycle step by itself at its time, every tick, with the same functions as the commands. S and F are the CTF's start and finish on CTFtime:
+
+| When | Step | Same as |
+|---|---|---|
+| S − 3 days | setup, named after the CTFtime title (cut to 90 characters, for Discord's names) | `/setup-ctf <title> <id>` |
+| S − 1 day | last call | `/last-call` |
+| F + 1 day | release | `/release-ctf` |
+| F + 5 days | lock and archive | `/lock-ctf` |
+| F + 5 days + 4 weeks | a reminder in `ADMIN_CHANNEL_ID` to remove the CTF with `/remove-ctf` | — |
+
+- **Setup** happens for every CTFtime event linked from a calendar session (see [CTF sessions](#ctf-sessions-and-the-daily-ctftime-check)) that never had a CTF set up with its ID, also when that CTF was removed since; one CTF per CTFtime ID, however many sessions link to it. Its dates come from what the daily CTFtime check stored, so a CTF it has not seen yet is set up after the next check. There is no automatic setup once it is past F + 5 days.
+- **The other steps** run for every CTF that is not removed and has a CTFtime ID. A CTF set up without one never gets automatic steps.
+- The steps are planned anew every tick from S, F and the times on the `ctfs` row, so when the daily CTFtime check moves S or F, the steps that haven't run move with it. A step already done, also by command (e.g. an early `/release-ctf`), is not run again, and nothing is ever undone.
+- Overdue steps (the bot was down, or the calendar session was added late) run in order on the next tick, except that the last call is skipped once S has passed or joining closed, and the release once the CTF is locked (a lock releases it anyway).
+- Each step done is noticed in the CTF's #bot. A step that a command did at the same time is not a failure. A step that fails is logged and tried again every tick, and the steps after it wait; its failure is posted once, in the CTF's #bot (or `ADMIN_CHANNEL_ID` for a setup), until it worked. This is kept in memory, so after a restart a failure is posted once more.
+- When every calendar session linking to a set-up CTF that is not locked is cancelled (or no longer links to it), the CTF is kept, and the calendar sync posts a note in its #bot. Sessions that are only over are no reason for a note.
+
+The plan is the pure `plan()` and `plan_setup()` in `utils/ctf_timeline.py`, which `/ctf-status` uses too; `run()` there runs the due steps, and `command_handlers/ctf_timeline.py` does them on the server. The job may run for 30 minutes, so a lock's archive is not stopped halfway.
 
 ## Calendar sync
 
@@ -183,7 +204,7 @@ Admins (`ADMIN_ROLE`) can run it in any channel to sync right away instead of wa
 
 A calendar event whose `URL` links to a CTFtime event (`ctftime.org/event/<id>`), or, when `URL` has no such link, whose description does, is a **CTF session**: the on-campus night of that CTF, not the whole CTF. The CTF's own start and finish always come from CTFtime, and several sessions can link to the same CTF. Events without a link (meetups etc.) are never checked. Every sync stores the start, title and CTFtime ID of each occurrence the bot has an event for in `calendar_occurrences`.
 
-Every day at 12:00 `TIMEZONE` the `ctftime-check` job asks CTFtime about every CTF linked from a session that is not over yet, and keeps what it found per CTF in the `ctftime_events` table (title, start, finish, when it was checked, and the start and finish the admins were last told about):
+Every day at 12:00 `TIMEZONE` the `ctftime-check` job asks CTFtime about every CTF linked from a session that is not over yet, and every CTF that is set up with a CTFtime ID and not locked (also without a session), and keeps what it found per CTF in the `ctftime_events` table (title, start, finish, when it was checked, and the start and finish the admins were last told about). The start and finish are also stored on the CTF's `ctfs` row once it is set up, so its [automatic steps](#the-automatic-timeline) move with them:
 
 - The first time a CTF is seen its dates are stored. When a session already falls outside the CTF (probably a typo in the calendar), that is alerted straight away.
 - When CTFtime's start or finish differ from what the admins were last told: one alert with the CTF, the old and new dates and the linked sessions, :warning: when at least one session falls outside the new dates, :information_source: when they all still fall within them. Nothing is posted while the dates stay the same.
@@ -191,7 +212,7 @@ Every day at 12:00 `TIMEZONE` the `ctftime-check` job asks CTFtime about every C
 - When CTFtime can't be reached or answers with an error, that CTF is skipped until the next check (logged, no alert).
 - An alert that can't be posted is logged and posted on the next check.
 
-Alerts go to `ADMIN_CHANNEL_ID`. Alerts list at most 5 sessions, to stay within one Discord message. The check itself is `check()` in `utils/ctftime_check.py`; deciding what to post and store is the pure `decide()` there.
+Alerts go to the CTF's #bot once it is set up, else (or when its #bot is gone) to `ADMIN_CHANNEL_ID`. Alerts list at most 5 sessions, to stay within one Discord message. The check itself is `check()` in `utils/ctftime_check.py`; deciding what to post and store is the pure `decide()` there.
 
 ### `/ctftime-check`
 

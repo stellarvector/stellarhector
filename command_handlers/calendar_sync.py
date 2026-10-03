@@ -1,5 +1,6 @@
 # Mirrors the ICS calendar feed (ICS_URL) into the server's Discord scheduled events,
 # announcing each new event in CALENDAR_CHANNEL_ID
+# Tells a CTF's #bot when every calendar session linking to it is gone
 # Runs by itself every ICS_POLL_MINUTES; switched off entirely when ICS_URL is not set
 # Alerts ADMIN_CHANNEL_ID once the feed has been broken for calendar_sync.FAILURES_BEFORE_ALERT syncs in a row,
 # or the sync has kept failing otherwise (Discord refusing to list the events) for as long
@@ -7,7 +8,7 @@
 #   by an administrator
 import asyncio
 import logging
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone
 
 import core.bot as bot
 import core.config as config_helpers
@@ -16,7 +17,7 @@ import discord
 from discord import app_commands
 from error_handlers.default import default as default_error_handler
 from error_handlers.permissions import check_role_error
-from utils import calendar_sync
+from utils import calendar_sync, ctf_timeline, ctftime_check
 from utils.text import inline_code
 
 ICS_URL = (bot.config.get("ICS_URL") or "").strip()
@@ -53,6 +54,7 @@ async def sync_calendar():
         channel_id = bot.channel_id("CALENDAR_CHANNEL_ID")
         announce_channel = None if channel_id is None else await bot.channel(channel_id)
 
+        sessions_before = ctftime_check.linked_sessions()
         try:
             summary = await calendar_sync.sync(guild, ICS_URL, bot.TIMEZONE, LOOKAHEAD, announce_channel, _ping_role(guild))
         except calendar_sync.FeedError as e:
@@ -62,9 +64,21 @@ async def sync_calendar():
             raise
 
         logging.getLogger("bot").info(f"Calendar sync done: {summary}")
+        for ctf in ctf_timeline.orphaned(sessions_before, datetime.now(timezone.utc)):
+            await _note_orphaned(ctf)
         if _health.succeeded() and await _alert(":white_check_mark: Calendar sync recovered."):
             _health.recovery_posted()
         return summary
+
+
+async def _note_orphaned(ctf):
+    """Tell the staff in the CTF's #bot that it has no calendar sessions left; a failure is logged."""
+    message = (":information_source: Every calendar session of this CTF was cancelled (or no longer links to it). The "
+               "CTF is kept, and its automatic steps still run: remove it with `/remove-ctf` if it's not played.")
+    try:
+        await asyncio.wait_for(bot.alert_ctf(ctf, message), timeout=scheduler.ALERT_TIMEOUT.total_seconds())
+    except Exception:
+        logging.getLogger("bot").exception(f"Could not tell CTF {ctf.name!r} its calendar sessions are gone")
 
 
 def _alert_message(error):

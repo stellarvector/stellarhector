@@ -11,7 +11,7 @@ from datetime import datetime
 import discord
 
 import core.db as db
-from utils import ctftime
+from utils import ctfs, ctftime
 from utils.text import cut
 from utils.unfinished import UnfinishedWork
 
@@ -163,7 +163,7 @@ async def check(now, alert, get_event=ctftime.get_event):
             result = replace(result, skipped=result.skipped + 1)
             continue
 
-        stored = _stored(ctftime_id)
+        stored = stored_record(ctftime_id)
         outcome = decide(ctftime_id, stored, event, sessions)
         # Shielded: when the check is stopped mid-alert, a posted alert is still remembered so it is not posted twice
         posted = await _unfinished.finish_even_if_stopped(_tell_and_store(stored, outcome, now, alert))
@@ -190,10 +190,14 @@ def overlaps(session, event):
 
 
 def _sessions_to_check(now):
-    """The Sessions per CTFtime event to check: the ones linked from a calendar session that is not over."""
-    # TODO ctf-lifecycle: also check the CTFs that are set up and not locked yet, even without a session
-    return {ctftime_id: linked for ctftime_id, linked in linked_sessions().items()
-            if any(session.end > now for session in linked)}
+    """The Sessions per CTFtime event to check: the ones linked from a calendar session that is not over, and the CTFs
+    that are set up and not locked yet, also without a session (their dates move their automatic steps)."""
+    linked = linked_sessions()
+    to_check = {ctftime_id: sessions for ctftime_id, sessions in linked.items()
+                if any(session.end > now for session in sessions)}
+    for ctftime_id in ctfs.ctftime_ids_not_locked():
+        to_check.setdefault(ctftime_id, linked.get(ctftime_id, []))
+    return dict(sorted(to_check.items()))
 
 
 async def _tell_and_store(stored, outcome, now, alert):
@@ -213,10 +217,14 @@ async def _tell_and_store(stored, outcome, now, alert):
             else:
                 record = replace(record, told_start=stored.told_start, told_finish=stored.told_finish, gone=stored.gone)
     _store(record, now)
+    if record.start is not None and not record.gone:
+        # The CTF's steps that haven't run yet move with its dates
+        ctfs.set_dates(record.ctftime_id, record.start, record.finish)
     return posted
 
 
-def _stored(ctftime_id):
+def stored_record(ctftime_id):
+    """The Record stored for the CTFtime event at the last check, or None when it was never checked."""
     with db.transaction() as conn:
         row = conn.execute("SELECT * FROM ctftime_events WHERE ctftime_id = ?", (ctftime_id,)).fetchone()
     if row is None:

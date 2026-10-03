@@ -13,6 +13,11 @@ from utils import ctf_archive, ctf_lock, ctf_places
 from utils.ctf_places import Place
 
 
+def lock_roles():
+    return ctf_lock.LockRoles(member=config_helpers.role_name(bot.config, "MEMBER_ROLE"),
+                              writers=frozenset(bot.STAFF_ROLES))
+
+
 @bot.client.tree.command(name="lock-ctf", description="Make the CTF read-only and archive it", guild=bot.guild)
 @app_commands.checks.has_any_role(*bot.MANAGER_ROLES)
 async def lock_ctf(interaction: discord.Interaction):
@@ -22,10 +27,8 @@ async def lock_ctf(interaction: discord.Interaction):
 
     await interaction.response.defer(thinking=True)
 
-    roles = ctf_lock.LockRoles(member=config_helpers.role_name(bot.config, "MEMBER_ROLE"),
-                               writers=frozenset(bot.STAFF_ROLES))
     try:
-        locked = await ctf_lock.lock(interaction.guild, location.ctf, roles, datetime.now(timezone.utc),
+        locked = await ctf_lock.lock(interaction.guild, location.ctf, lock_roles(), datetime.now(timezone.utc),
                                      ctf_archive.archive)
     except ctf_lock.LockRefused as e:
         await interaction.edit_original_response(content=f":no_entry: {e}")

@@ -45,6 +45,20 @@ async def alert_admins(message):
     admin_channel = await channel(admin_channel_id)
     await admin_channel.send(message, allowed_mentions=discord.AllowedMentions.none())
 
+async def alert_ctf(ctf, message):
+    """Post message in the #bot channel of the CTF (a ctfs.Ctf), or for the admins (alert_admins) when ctf is None or
+    its #bot no longer exists."""
+    if ctf is not None:
+        try:
+            bot_channel = await channel(ctf.bot_channel_id)
+        except discord.NotFound:
+            logging.getLogger("bot").warning(f"The #bot channel of CTF {ctf.name!r} no longer exists, alerting the "
+                                             f"admins")
+        else:
+            await bot_channel.send(message, allowed_mentions=discord.AllowedMentions.none())
+            return
+    await alert_admins(message)
+
 jinja_env = Environment(
     loader=PackageLoader("utils", "templates"),
     autoescape=select_autoescape()

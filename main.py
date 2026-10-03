@@ -28,6 +28,7 @@ LOAD_COMMANDS = [
     "release_ctf",
     "lock_ctf",
     "ctf_status",
+    "ctf_timeline",
     "ctftime_table",
     "calendar_sync",
     "ctftime_check",
