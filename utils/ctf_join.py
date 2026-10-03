@@ -1,6 +1,6 @@
 """Signing up for a CTF: the join message in #upcoming-ctfs with its Join button (posted anew at the bottom by the last
 call), the approval cards in the CTF's #bot on which staff let plain players in, and the Leave button on the guide in
-the CTF's main channel.
+the CTF's main channel. Once the CTF is released, close_joining closes the join message and the cards.
 
 decide, join_message, approval_card and decision_line are pure: who may join how, and what the join message and the
 cards say. The buttons keep working after a restart: their custom_id holds the CTF's ID, and register makes the bot
@@ -69,6 +69,7 @@ _approval_roles = None
 _refresh_locks = defaultdict(asyncio.Lock)
 
 STILL_PENDING = "Still waiting for moderator confirmation"
+CARD_CLOSED = ":lock: No longer needed: CTF released"
 
 
 def register(client, roles, approval_roles):
@@ -80,9 +81,11 @@ def register(client, roles, approval_roles):
     client.add_dynamic_items(JoinButton, LeaveButton, ApprovalButton)
 
 
-def join_view(ctf_id):
-    """The Join button of the CTF's join message."""
-    return discord.ui.View(timeout=None).add_item(JoinButton(ctf_id))
+def join_view(ctf_id, disabled=False):
+    """The Join button of the CTF's join message, disabled once joining is closed."""
+    button = JoinButton(ctf_id)
+    button.item.disabled = disabled
+    return discord.ui.View(timeout=None).add_item(button)
 
 
 def leave_view(ctf_id):
@@ -123,13 +126,23 @@ def decide(role_names, roles, status, closed):
 
 def join_message(ctf, player_ids, sessions):
     """The join message of the CTF: its name (as a last call once that was done), CTFtime link and dates, its on-campus
-    sessions (ctftime_check.Sessions), and who plays (the user IDs of the joined players, in the order they joined)."""
+    sessions (ctftime_check.Sessions), and who plays (the user IDs of the joined players, in the order they joined).
+    Once the CTF is released, it says joining is closed instead of listing the sessions."""
     name = discord.utils.escape_markdown(ctf.name)
-    lines = [f"## :zap: {name}" if ctf.last_call_at is None else f"## :rotating_light: Last call: {name}"]
+    released = ctf.released_at is not None
+    if released:
+        lines = [f"## :unlock: {name}"]
+    else:
+        lines = [f"## :zap: {name}" if ctf.last_call_at is None else f"## :rotating_light: Last call: {name}"]
     if ctf.ctftime_id is not None:
         lines.append(f"<https://ctftime.org/event/{ctf.ctftime_id}/>")
     if ctf.start is not None and ctf.finish is not None:
         lines.append(f"From {_period(ctf.start, ctf.finish)}")
+
+    if released:
+        lines.append(_playing(player_ids, released=True))
+        lines.append(f"**Joining is closed:** the CTF is open to all members, see <#{ctf.main_channel_id}>")
+        return "\n".join(lines)
 
     if sessions:
         lines.append("**On campus:**")
@@ -170,9 +183,9 @@ def decision_line(decision, moderator_id, problem=None):
     return line if problem is None else f"{line} ({problem})"
 
 
-def _playing(player_ids):
+def _playing(player_ids, released=False):
     if not player_ids:
-        return "**Playing:** nobody yet, click **Join** to be the first"
+        return "**Playing:** nobody" if released else "**Playing:** nobody yet, click **Join** to be the first"
 
     names = ", ".join(f"<@{user_id}>" for user_id in player_ids[:PLAYER_LIMIT])
     more = f" and {len(player_ids) - PLAYER_LIMIT} more" if len(player_ids) > PLAYER_LIMIT else ""
@@ -231,9 +244,10 @@ async def _delete_join_message(guild, ctf):
                                            f"by hand")
 
 
-async def refresh_join_message(guild, ctf):
-    """Show the CTF's current player list and sessions on its join message, if it has one. A join message that can't
-    be edited is logged: the player list itself is right, and the next refresh tries again."""
+async def refresh_join_message(guild, ctf, view=None):
+    """Show the CTF's current player list and sessions on its join message, if it has one, and the view instead of its
+    buttons when given. A join message that can't be edited is logged: the player list itself is right, and the
+    next refresh tries again."""
     async with _refresh_locks[ctf.id]:
         # As stored now: the last call may have moved the join message since ctf was read
         ctf = ctfs.get(ctf.id)
@@ -247,9 +261,39 @@ async def refresh_join_message(guild, ctf):
 
         try:
             await channel.get_partial_message(ctf.join_message_id).edit(
-                content=current_join_message(ctf), allowed_mentions=discord.AllowedMentions.none())
+                content=current_join_message(ctf), allowed_mentions=discord.AllowedMentions.none(),
+                **({} if view is None else {"view": view}))
         except discord.HTTPException:
             logging.getLogger("bot").exception(f"Could not update the join message of CTF {ctf.name!r}")
+
+
+async def close_joining(guild, ctf):
+    """Now that the CTF is released, show on its join message that joining is closed, with its Join button disabled,
+    and close the approval cards of who still waits: they are taken off the player list, and their cards say they are
+    no longer needed, without buttons. Messages that can't be edited are logged; one deleted by hand is fine."""
+    pending = [player for player in ctfs.players(ctf.id) if player.status == "pending"]
+    # Off the list before the first await, so a click on one of their cards meanwhile is told it was already handled
+    for player in pending:
+        ctfs.remove_player(ctf.id, player.user_id)
+
+    await refresh_join_message(guild, ctf, view=join_view(ctf.id, disabled=True))
+
+    bot_channel = guild.get_channel(ctf.bot_channel_id)
+    for player in pending:
+        if player.approval_card_message_id is not None and bot_channel is not None:
+            await _close_card(bot_channel, player.approval_card_message_id)
+
+
+
+async def _close_card(channel, message_id):
+    try:
+        card = await channel.fetch_message(message_id)
+        await card.edit(content=f"{card.content}\n{CARD_CLOSED}", view=None,
+                        allowed_mentions=discord.AllowedMentions.none())
+    except discord.NotFound:
+        pass
+    except discord.HTTPException:
+        logging.getLogger("bot").exception(f"Could not close approval card {message_id}, remove its buttons by hand")
 
 
 def current_join_message(ctf, now=None):
@@ -399,7 +443,10 @@ async def _ask_moderators(guild, member, ctf):
     except BaseException:
         ctfs.remove_player(ctf.id, member.id)
         raise
-    ctfs.set_approval_card(ctf.id, member.id, card.id)
+    if not ctfs.set_approval_card(ctf.id, member.id, card.id) and is_closed(ctfs.get(ctf.id)):
+        # Released while the card was posted, after its pending players were taken off the list
+        await _close_card(bot_channel, card.id)
+        return f":no_entry: Joining **{discord.utils.escape_markdown(ctf.name)}** is closed."
     return "Waiting for moderator confirmation"
 
 
@@ -473,8 +520,12 @@ async def _accept(guild, member, ctf, ctf_role, entry, decision):
     try:
         await member.add_roles(*roles)
     except BaseException:
-        # Back to waiting on this card, so it can be tried again
-        ctfs.reopen_request(ctf.id, member.id, entry.joined_at, entry.approval_card_message_id)
+        if is_closed(ctfs.get(ctf.id)):
+            # Released meanwhile: no longer waiting, the card is closed
+            ctfs.remove_player(ctf.id, member.id)
+        else:
+            # Back to waiting on this card, so it can be tried again
+            ctfs.reopen_request(ctf.id, member.id, entry.joined_at, entry.approval_card_message_id)
         raise
     await refresh_join_message(guild, ctf)
     return problem

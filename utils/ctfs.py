@@ -92,6 +92,15 @@ def mark_last_call(ctf_id, channel_id, message_id, at):
                      (channel_id, message_id, db.time_text(at), ctf_id))
 
 
+def mark_released(ctf_id, at):
+    """Remember that the CTF was released at the time at, unless it was already. Returns whether that changed it, so of
+    two runs at the same time only one does."""
+    with db.transaction() as conn:
+        cursor = conn.execute("UPDATE ctfs SET released_at = ? WHERE id = ? AND released_at IS NULL",
+                              (db.time_text(at), ctf_id))
+        return cursor.rowcount == 1
+
+
 def set_overview_message(ctf_id, message_id):
     """Remember the CTF's challenge overview message in its main channel."""
     with db.transaction() as conn:
@@ -146,10 +155,12 @@ def add_pending_player(ctf_id, user_id, at):
 
 
 def set_approval_card(ctf_id, user_id, message_id):
-    """Remember the approval card posted for the user's pending request to join the CTF."""
+    """Remember the approval card posted for the user's pending request to join the CTF. Returns whether they were
+    still pending, so had the card stored."""
     with db.transaction() as conn:
-        conn.execute("UPDATE ctf_players SET approval_card_message_id = ? WHERE ctf_id = ? AND user_id = ?",
-                     (message_id, ctf_id, user_id))
+        cursor = conn.execute("UPDATE ctf_players SET approval_card_message_id = ? WHERE ctf_id = ? AND user_id = ?"
+                              " AND status = 'pending'", (message_id, ctf_id, user_id))
+        return cursor.rowcount == 1
 
 
 def reopen_request(ctf_id, user_id, at, message_id):

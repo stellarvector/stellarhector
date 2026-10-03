@@ -62,12 +62,18 @@ class FakeMember:
         self.dms.append(content)
 
 
+_KEEP = object()
+
+
 class FakeMessage:
     def __init__(self, content, view=None):
         self.id, self.content, self.view = next(_ids), content, view
 
-    async def edit(self, content, allowed_mentions=None):
-        self.content = content
+    async def edit(self, content=_KEEP, view=_KEEP, allowed_mentions=None):
+        if content is not _KEEP:
+            self.content = content
+        if view is not _KEEP:
+            self.view = view
 
 
 class FakeChannel:
@@ -80,6 +86,9 @@ class FakeChannel:
 
     def get_partial_message(self, message_id):
         return FakePartialMessage(self, message_id)
+
+    async def fetch_message(self, message_id):
+        return self.get_partial_message(message_id)._message()
 
 
 class FakePartialMessage:
@@ -94,8 +103,8 @@ class FakePartialMessage:
             raise http_error(discord.NotFound, 404)
         return message
 
-    async def edit(self, content, allowed_mentions=None):
-        await self._message().edit(content, allowed_mentions)
+    async def edit(self, content=_KEEP, view=_KEEP, allowed_mentions=None):
+        await self._message().edit(content, view, allowed_mentions)
 
     async def delete(self):
         self.channel.messages.remove(self._message())

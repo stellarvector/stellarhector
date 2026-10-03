@@ -105,6 +105,24 @@ class JoinMessageTest(unittest.TestCase):
                          "## :rotating_light: Last call: Foo CTF\n"
                          "**Playing (1):** <@42>")
 
+    def test_once_released_it_says_joining_is_closed_and_the_ctf_is_open_to_all_members(self):
+        ctf = replace(CTF, ctftime_id=3352, start=START, finish=FINISH, last_call_at=utc(2026, 10, 9, 8),
+                      released_at=utc(2026, 10, 13, 8))
+        sessions = [Session("CTF night", utc(2026, 10, 10, 17), utc(2026, 10, 10, 22))]
+
+        self.assertEqual(ctf_join.join_message(ctf, [42], sessions),
+                         "## :unlock: Foo CTF\n"
+                         "<https://ctftime.org/event/3352/>\n"
+                         "From <t:1791619200:F> to <t:1791792000:F>\n"
+                         "**Playing (1):** <@42>\n"
+                         "**Joining is closed:** the CTF is open to all members, see <#3>")
+
+    def test_once_released_without_players_it_does_not_ask_to_join(self):
+        self.assertEqual(ctf_join.join_message(replace(CTF, released_at=utc(2026, 10, 13, 8)), [], []),
+                         "## :unlock: Foo CTF\n"
+                         "**Playing:** nobody\n"
+                         "**Joining is closed:** the CTF is open to all members, see <#3>")
+
     def test_name_shows_as_typed_without_markdown(self):
         self.assertTrue(ctf_join.join_message(replace(CTF, name="*Foo* CTF"), [], []).startswith(
             "## :zap: \\*Foo\\* CTF\n"))

@@ -124,6 +124,14 @@ class StoreTest(unittest.TestCase):
 
         self.assertEqual(ctfs.get(created.id).overview_message_id, 77)
 
+    def test_release_time_is_stored_once(self):
+        created = ctfs.create(new_ctf())
+
+        self.assertTrue(ctfs.mark_released(created.id, utc(2026, 10, 13, 8)))
+        self.assertFalse(ctfs.mark_released(created.id, utc(2026, 10, 14, 8)))
+
+        self.assertEqual(ctfs.get(created.id).released_at, utc(2026, 10, 13, 8))
+
     def test_archive_time_is_stored(self):
         created = ctfs.create(new_ctf())
         ctfs.mark_archived(created.id, utc(2026, 10, 20, 9))
@@ -168,9 +176,17 @@ class PlayersTest(unittest.TestCase):
                                                                    approval_card_message_id=None,
                                                                    joined_at=utc(2026, 10, 3, 12)))
 
-        ctfs.set_approval_card(self.ctf.id, 42, 77)
+        self.assertTrue(ctfs.set_approval_card(self.ctf.id, 42, 77))
 
         self.assertEqual(ctfs.player(self.ctf.id, 42).approval_card_message_id, 77)
+
+    def test_approval_card_is_not_stored_for_who_no_longer_waits(self):
+        ctfs.add_player(self.ctf.id, 42, utc(2026, 10, 3, 12))
+
+        self.assertFalse(ctfs.set_approval_card(self.ctf.id, 42, 77))
+        self.assertFalse(ctfs.set_approval_card(self.ctf.id, 43, 78))
+
+        self.assertIsNone(ctfs.player(self.ctf.id, 42).approval_card_message_id)
 
     def test_someone_not_on_the_list_is_no_player(self):
         ctfs.add_player(self.ctf.id, 42, utc(2026, 10, 3, 12))

@@ -83,9 +83,7 @@ class LastCallTest(unittest.IsolatedAsyncioTestCase):
                 self.assertIsNone(ctfs.get(self.ctf.id).last_call_at)
 
     async def test_refused_when_joining_closed_since_the_ctf_was_read(self):
-        # Until /release-ctf records it (ticket 09), straight into the store
-        with db.transaction() as conn:
-            conn.execute("UPDATE ctfs SET released_at = ? WHERE id = ?", (db.time_text(utc(2026, 10, 8, 8)), self.ctf.id))
+        ctfs.mark_released(self.ctf.id, utc(2026, 10, 8, 8))
 
         with self.assertRaises(ctf_join.LastCallRefused):
             await self.last_call()
