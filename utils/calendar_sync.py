@@ -16,6 +16,7 @@ import icalendar
 import recurring_ical_events
 
 import core.db as db
+from utils.ctftime import parse_ctftime_id
 
 # Discord refuses events that a bot creates with a start in the past, so running events start this much from now
 START_DELAY = timedelta(minutes=1)
@@ -86,6 +87,13 @@ class Occurrence:
         """What identifies the occurrence across syncs: its UID and its slot in UTC, or only its UID when it does not
         recur, so moving it keeps the key."""
         return self.uid, "" if self.slot is None else _utc_text(self.slot)
+
+    @property
+    def ctftime_id(self):
+        """The CTFtime event this occurrence is a CTF session of: the one linked in URL, else in the description.
+        None for a normal event (meetup etc.)."""
+        ctftime_id = parse_ctftime_id(self.url)
+        return parse_ctftime_id(self.description) if ctftime_id is None else ctftime_id
 
 
 @dataclass(frozen=True)
@@ -467,7 +475,8 @@ async def sync(guild, ics_url, tz, lookahead, announce_channel=None, ping_role=N
     in announce_channel when it is set, for every occurrence in scope that has none yet, quietly update or
     recreate the events the bot created before, and delete the ones cancelled in the calendar with a reply to their
     announcement. Occurrences that are over are forgotten, and their events quietly deleted when Discord still has
-    them. Returns a Summary.
+    them. What the calendar has for the occurrences the bot has an event for is remembered (remember_occurrences).
+    Returns a Summary.
 
     Raises FeedError, before anything changes, when the feed can't be downloaded or parsed, EmptyFeed (a FeedError)
     when it has no events while the bot manages some, and discord.HTTPException
@@ -514,7 +523,25 @@ async def sync(guild, ics_url, tz, lookahead, announce_channel=None, ping_role=N
             if announce_channel is not None and message_id is not None:
                 await _edit_announcement(announce_channel, message_id, action, event, ping_role)
 
+    remember_occurrences(occurrences)
     return Summary(created=created, updated=updated, cancelled=cancelled)
+
+
+def remember_occurrences(occurrences):
+    """Store the start, title (as the event is named) and CTFtime link each occurrence has in the calendar now,
+    for the occurrences the bot has an event for; the daily CTFtime check reads the CTF sessions from there.
+    Like plan, the first of an occurrence listed twice wins."""
+    remembered = set()
+    with db.transaction() as conn:
+        for occurrence in occurrences:
+            if occurrence.key in remembered:
+                continue
+            remembered.add(occurrence.key)
+            uid, slot = occurrence.key
+            values = (_utc_text(occurrence.start), _title(occurrence, NAME_LIMIT), occurrence.ctftime_id)
+            # Only written when something changed, so a sync that changes nothing writes nothing
+            conn.execute("UPDATE calendar_occurrences SET start_time = ?, title = ?, ctftime_id = ? WHERE uid = ? AND start = ?"
+                         " AND (start_time IS NOT ? OR title IS NOT ? OR ctftime_id IS NOT ?)", (*values, uid, slot, *values))
 
 
 def _details_in_discord(event):

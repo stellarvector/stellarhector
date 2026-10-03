@@ -25,6 +25,7 @@ LOAD_COMMANDS = [
     "release_ctf",
     "ctftime_table",
     "calendar_sync",
+    "ctftime_check",
 ]
 
 

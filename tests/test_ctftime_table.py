@@ -4,6 +4,7 @@ from datetime import date, datetime, timezone
 
 from utils import ctftime_table
 from utils.ctftime import CtftimeError, Event
+from utils.ctftime_check import Session
 
 TZ = "Europe/Brussels"
 
@@ -25,6 +26,14 @@ def event(event_id=1, title="Foo CTF 2026", start=utc(2026, 11, 7, 10), finish=u
         url="https://foo.example",
         ctftime_url=f"https://ctftime.org/event/{event_id}/",
     )
+
+
+def session(start, end):
+    return Session(title="CTF night", start=start, end=end)
+
+
+def no_sessions():
+    return {}
 
 
 def code_part(line):
@@ -149,19 +158,20 @@ class MarkTest(unittest.TestCase):
         self.assertIsNone(ctftime_table.mark(event(), []))
 
     def test_overlapping_session(self):
-        sessions = [(utc(2026, 11, 7, 17), utc(2026, 11, 7, 22))]
+        sessions = [session(utc(2026, 11, 7, 17), utc(2026, 11, 7, 22))]
         self.assertEqual(ctftime_table.mark(event(), sessions), ctftime_table.IN_CALENDAR)
 
     def test_session_outside_the_ctf(self):
-        sessions = [(utc(2026, 11, 14, 17), utc(2026, 11, 14, 22))]
+        sessions = [session(utc(2026, 11, 14, 17), utc(2026, 11, 14, 22))]
         self.assertEqual(ctftime_table.mark(event(), sessions), ctftime_table.NOT_OVERLAPPING)
 
     def test_session_touching_the_end_does_not_overlap(self):
-        sessions = [(utc(2026, 11, 9, 10), utc(2026, 11, 9, 12))]
+        sessions = [session(utc(2026, 11, 9, 10), utc(2026, 11, 9, 12))]
         self.assertEqual(ctftime_table.mark(event(), sessions), ctftime_table.NOT_OVERLAPPING)
 
     def test_one_session_outside_is_enough_for_a_warning(self):
-        sessions = [(utc(2026, 11, 7, 17), utc(2026, 11, 7, 22)), (utc(2026, 11, 14, 17), utc(2026, 11, 14, 22))]
+        sessions = [session(utc(2026, 11, 7, 17), utc(2026, 11, 7, 22)),
+                    session(utc(2026, 11, 14, 17), utc(2026, 11, 14, 22))]
         self.assertEqual(ctftime_table.mark(event(), sessions), ctftime_table.NOT_OVERLAPPING)
 
 
@@ -261,6 +271,25 @@ class FakeChannel:
 
 
 class PostTableTest(unittest.TestCase):
+    def test_ctfs_with_calendar_sessions_are_marked(self):
+        async def list_events(start, finish):
+            return [event(1), event(2, start=utc(2026, 11, 14, 10), finish=utc(2026, 11, 15, 10)), event(3)]
+
+        def linked_sessions():
+            return {
+                1: [session(utc(2026, 11, 7, 17), utc(2026, 11, 7, 22))],
+                2: [session(utc(2026, 11, 21, 17), utc(2026, 11, 21, 22))],
+            }
+
+        channel = FakeChannel()
+        asyncio.run(ctftime_table.post_table(channel, (2026, 11), 1, TZ, list_events=list_events,
+                                             linked_sessions=linked_sessions))
+
+        lines = channel.sent[0].splitlines()
+        self.assertIn("` ✅ [ctftime](<https://ctftime.org/event/1/>)", lines[1])
+        self.assertIn("` [ctftime](<https://ctftime.org/event/3/>)", lines[2])
+        self.assertIn("` ⚠️ [ctftime](<https://ctftime.org/event/2/>)", lines[3])
+
     def test_fetches_the_whole_range_and_posts_every_message(self):
         requested = []
 
@@ -269,7 +298,8 @@ class PostTableTest(unittest.TestCase):
             return [event(1)]
 
         channel = FakeChannel()
-        count = asyncio.run(ctftime_table.post_table(channel, (2026, 11), 2, TZ, list_events=list_events))
+        count = asyncio.run(ctftime_table.post_table(channel, (2026, 11), 2, TZ, list_events=list_events,
+                                                      linked_sessions=no_sessions))
 
         self.assertEqual(count, 1)
         self.assertEqual(requested, [(utc(2026, 10, 31, 23), utc(2026, 12, 31, 23))])
@@ -283,7 +313,8 @@ class PostTableTest(unittest.TestCase):
 
         channel = FakeChannel()
         with self.assertRaises(CtftimeError):
-            asyncio.run(ctftime_table.post_table(channel, (2026, 11), 2, TZ, list_events=list_events))
+            asyncio.run(ctftime_table.post_table(channel, (2026, 11), 2, TZ, list_events=list_events,
+                                                 linked_sessions=no_sessions))
         self.assertEqual(channel.sent, [])
 
 

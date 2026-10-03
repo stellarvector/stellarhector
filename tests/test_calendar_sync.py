@@ -815,5 +815,28 @@ class AllDayTest(unittest.TestCase):
         self.assertEqual(actions[0].occurrence.start, brussels(2026, 10, 3))
 
 
+class CtfSessionTest(unittest.TestCase):
+    def test_ctftime_link_in_the_url_makes_a_ctf_session(self):
+        occurrences = parse("UID:ctf\nDTSTART:20261010T180000Z\nDTEND:20261010T220000Z\nURL:https://ctftime.org/event/3352/")
+
+        self.assertEqual(occurrences[0].ctftime_id, 3352)
+
+    def test_ctftime_link_in_the_description_makes_a_ctf_session(self):
+        occurrences = parse("UID:ctf\nDTSTART:20261010T180000Z\nDTEND:20261010T220000Z\nURL:https://example.com\n"
+                            "DESCRIPTION:We play https://ctftime.org/event/3352 tonight")
+
+        self.assertEqual(occurrences[0].ctftime_id, 3352)
+
+    def test_link_in_the_url_wins_over_the_description(self):
+        meeting = occurrence(url="https://ctftime.org/event/1", description="Last year: https://ctftime.org/event/2")
+
+        self.assertEqual(meeting.ctftime_id, 1)
+
+    def test_event_without_a_ctftime_link_is_a_normal_event(self):
+        meeting = occurrence(url="https://example.com", description="Meetup with pizza")
+
+        self.assertIsNone(meeting.ctftime_id)
+
+
 if __name__ == "__main__":
     unittest.main()

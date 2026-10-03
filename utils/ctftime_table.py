@@ -9,7 +9,7 @@ from zoneinfo import ZoneInfo
 
 import discord
 
-from utils import ctftime
+from utils import ctftime, ctftime_check
 
 # Discord refuses messages longer than this
 MESSAGE_LIMIT = 2000
@@ -70,10 +70,10 @@ def date_range(month_list, tz):
 
 
 def mark(event, sessions):
-    """IN_CALENDAR, NOT_OVERLAPPING or None for an event with these calendar sessions, as (start, end) pairs."""
+    """IN_CALENDAR, NOT_OVERLAPPING or None for an event with these calendar ctftime_check.Sessions."""
     if not sessions:
         return None
-    if all(start < event.finish and event.start < end for start, end in sessions):
+    if all(ctftime_check.overlaps(session, event) for session in sessions):
         return IN_CALENDAR
     return NOT_OVERLAPPING
 
@@ -149,16 +149,20 @@ def split_messages(lines, limit=MESSAGE_LIMIT):
     return messages
 
 
-async def post_table(channel, start, count, tz, list_events=ctftime.list_events):
-    """Post the table for count months from start, as (year, month), in channel. Returns how many CTFs it lists.
+async def post_table(channel, start, count, tz, list_events=ctftime.list_events,
+                     linked_sessions=ctftime_check.linked_sessions):
+    """Post the table for count months from start, as (year, month), in channel, marking the CTFs with sessions in
+    the calendar. Returns how many CTFs it lists.
 
     Raises CtftimeError, before anything is posted, when CTFtime can't be reached.
     A discord.HTTPException may come after some messages are already posted.
     """
     month_list = months(start, count)
     events = await list_events(*date_range(month_list, tz))
+    sessions = linked_sessions()
+    marks = {event.id: mark(event, sessions.get(event.id)) for event in events}
 
-    for message in split_messages(table_lines(events, month_list, tz)):
+    for message in split_messages(table_lines(events, month_list, tz, marks)):
         # A CTF name must never ping anyone
         await channel.send(message, allowed_mentions=discord.AllowedMentions.none())
     return len(events)

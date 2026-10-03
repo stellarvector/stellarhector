@@ -77,7 +77,7 @@ Network errors, timeouts, error responses other than a 404 on an event, and resp
 
 ### `/ctftime-table [start-month] [months]`
 
-Admins and managers can run it in any channel; it always posts in `CTF_SELECTION_CHANNEL_ID`. It lists every CTF on CTFtime starting in `months` months (default 2) from `start-month` (default next month; a month number such as `11` means the next time that month comes around, `2026-11` is that exact month). The first month is marked (validate), the later ones (preview). Each CTF is one line of fixed-width columns (dates in `TIMEZONE`, name, format, weight, online/onsite) in inline code, followed by a CTFtime link without a preview. Messages are split between lines to stay under Discord's 2000 characters.
+Admins and managers can run it in any channel; it always posts in `CTF_SELECTION_CHANNEL_ID`. It lists every CTF on CTFtime starting in `months` months (default 2) from `start-month` (default next month; a month number such as `11` means the next time that month comes around, `2026-11` is that exact month). The first month is marked (validate), the later ones (preview). Each CTF is one line of fixed-width columns (dates in `TIMEZONE`, name, format, weight, online/onsite) in inline code, followed by a CTFtime link without a preview. A CTF that has a session in the calendar (see [CTF sessions](#ctf-sessions-and-the-daily-ctftime-check)) is marked ✅, or ⚠️ when a session falls outside the CTF. The bot only knows the sessions it created a Discord event for, those within `ICS_LOOKAHEAD_DAYS`, so a CTF whose sessions are further away is not marked yet. Messages are split between lines to stay under Discord's 2000 characters.
 
 The lines are built by `utils/ctftime_table.py`; `post_table` posts it, so the monthly post can call the same code.
 
@@ -121,3 +121,21 @@ The sync itself is `sync_calendar()` in `command_handlers/calendar_sync.py`; it 
 ### `/calendar-sync`
 
 Admins (`ADMIN_ROLE`) can run it in any channel to sync right away instead of waiting for the next poll, for example right after editing the calendar. It runs the same sync as the job (waiting for a scheduled sync that is running) and replies, only to the admin, with how many events were created, updated and cancelled, or with the reason the sync was skipped. A skipped sync counts toward the alert like any skipped scheduled sync. When `ICS_URL` is not set it replies that there is no calendar to sync.
+
+### CTF sessions and the daily CTFtime check
+
+A calendar event whose `URL` links to a CTFtime event (`ctftime.org/event/<id>`), or, when `URL` has no such link, whose description does, is a **CTF session**: the on-campus night of that CTF, not the whole CTF. The CTF's own start and finish always come from CTFtime, and several sessions can link to the same CTF. Events without a link (meetups etc.) are never checked. Every sync stores the start, title and CTFtime ID of each occurrence the bot has an event for in `calendar_occurrences`.
+
+Every day at 12:00 `TIMEZONE` the `ctftime-check` job asks CTFtime about every CTF linked from a session that is not over yet, and keeps what it found per CTF in the `ctftime_events` table (title, start, finish, when it was checked, and the start and finish the admins were last told about):
+
+- The first time a CTF is seen its dates are stored. When a session already falls outside the CTF (probably a typo in the calendar), that is alerted straight away.
+- When CTFtime's start or finish differ from what the admins were last told: one alert with the CTF, the old and new dates and the linked sessions, :warning: when at least one session falls outside the new dates, :information_source: when they all still fall within them. Nothing is posted while the dates stay the same.
+- When CTFtime no longer knows the CTF (404): one :warning: alert, not repeated on the next days.
+- When CTFtime can't be reached or answers with an error, that CTF is skipped until the next check (logged, no alert).
+- An alert that can't be posted is logged and posted on the next check.
+
+Alerts go to `ADMIN_CHANNEL_ID`. Alerts list at most 5 sessions, to stay within one Discord message. The check itself is `check()` in `utils/ctftime_check.py`; deciding what to post and store is the pure `decide()` there.
+
+### `/ctftime-check`
+
+Admins (`ADMIN_ROLE`) can run it in any channel to run the daily check right away (waiting for a check that is running). It replies, only to the admin, with how many CTFs were checked and how many alerts were posted, and how many CTFs were skipped because CTFtime could not be reached.
