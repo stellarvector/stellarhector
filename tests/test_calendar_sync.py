@@ -605,6 +605,33 @@ class FeedHealthTest(unittest.TestCase):
         self.assertEqual(self.fail_times(health, 10), [False] * 9 + [True])
 
 
+class CommandReplyTest(unittest.TestCase):
+    def test_summary_counts_what_changed(self):
+        reply = calendar_sync.summary_reply(calendar_sync.Summary(created=2, updated=1, cancelled=3))
+
+        self.assertEqual(reply, ":white_check_mark: Calendar synced: 2 created, 1 updated, 3 cancelled.")
+
+    def test_summary_of_a_sync_that_changed_nothing(self):
+        reply = calendar_sync.summary_reply(calendar_sync.Summary())
+
+        self.assertEqual(reply, ":white_check_mark: Calendar synced: 0 created, 0 updated, 0 cancelled.")
+
+    def test_skipped_sync_gives_the_reason(self):
+        reply = calendar_sync.skipped_reply(calendar_sync.FeedError("Calendar feed could not be downloaded: boom"))
+
+        self.assertEqual(reply, ":warning: Calendar sync skipped, nothing changed. Reason: `Calendar feed could not be downloaded: boom`")
+
+    def test_skipped_reason_with_backticks_keeps_the_inline_code_intact(self):
+        reply = calendar_sync.skipped_reply(calendar_sync.FeedError("bad `line`"))
+
+        self.assertTrue(reply.endswith("Reason: `bad 'line'`"))
+
+    def test_long_skipped_reason_is_cut(self):
+        reply = calendar_sync.skipped_reply(calendar_sync.FeedError("x" * 5000))
+
+        self.assertLess(len(reply), 2000)
+
+
 class RecurringTest(unittest.TestCase):
     def test_weekly_event_has_one_occurrence_per_week_in_the_window(self):
         occurrences = parse(WEEKLY)

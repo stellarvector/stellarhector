@@ -25,7 +25,7 @@ Role names (not IDs), as they appear on the server:
 - `CORE_PLAYER_ROLE`, `KNOWN_PLAYER_ROLE`, `PLAYER_ROLE`: the player tiers.
 - `MEMBER_ROLE`: every member of the team.
 
-In code, `bot.STAFF_ROLES` (admin, manager, moderator) and `bot.MANAGER_ROLES` (admin, manager) are the role groups commands check with `@app_commands.checks.has_any_role(*bot.MANAGER_ROLES)`. Roles that are not set are left out.
+In code, `bot.STAFF_ROLES` (admin, manager, moderator), `bot.MANAGER_ROLES` (admin, manager) and `bot.ADMIN_ROLES` (admin) are the role groups commands check with `@app_commands.checks.has_any_role(*bot.MANAGER_ROLES)`. Roles that are not set are left out.
 
 ### Channels
 
@@ -116,4 +116,8 @@ If the feed can't be downloaded, returns an error or doesn't parse, the sync is 
 
 The bot needs the **Create Events** and **Manage Events** permissions on the server, and permission to send messages and embeds in `CALENDAR_CHANNEL_ID`.
 
-The sync itself is `run_calendar_sync()` in `command_handlers/calendar_sync.py`; it returns a summary of what it created, updated (recreated events included) and cancelled. The ICS parsing, the planning of what to create, update, recreate, cancel and forget, and the announcement are pure functions in `utils/calendar_sync.py`.
+The sync itself is `sync_calendar()` in `command_handlers/calendar_sync.py`; it returns a summary of what it created, updated (recreated events included) and cancelled, or raises the `FeedError` of a skipped sync. The `calendar-sync` job runs it through `run_calendar_sync()`, which only logs a skipped sync. One lock is held around the sync, so the job and `/calendar-sync` never run at the same time and never create an event twice. The ICS parsing, the planning of what to create, update, recreate, cancel and forget, the announcement and the `/calendar-sync` replies are pure functions in `utils/calendar_sync.py`.
+
+### `/calendar-sync`
+
+Admins (`ADMIN_ROLE`) can run it in any channel to sync right away instead of waiting for the next poll, for example right after editing the calendar. It runs the same sync as the job (waiting for a scheduled sync that is running) and replies, only to the admin, with how many events were created, updated and cancelled, or with the reason the sync was skipped. A skipped sync counts toward the alert like any skipped scheduled sync. When `ICS_URL` is not set it replies that there is no calendar to sync.

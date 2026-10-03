@@ -13,6 +13,7 @@ TIMEZONE = config_helpers.timezone(config)
 # Role groups for has_any_role, e.g. @app_commands.checks.has_any_role(*bot.MANAGER_ROLES)
 STAFF_ROLES = config_helpers.role_names(config, "ADMIN_ROLE", "MANAGER_ROLE", "MODERATOR_ROLE")
 MANAGER_ROLES = config_helpers.role_names(config, "ADMIN_ROLE", "MANAGER_ROLE")
+ADMIN_ROLES = config_helpers.role_names(config, "ADMIN_ROLE")
 
 # Server-wide channels; a feature whose channel is None is switched off
 FEATURE_CHANNELS = [

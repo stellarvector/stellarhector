@@ -1,6 +1,6 @@
 """Mirrors the events of the ICS calendar feed into the server's Discord scheduled events.
 
-parse_occurrences, plan and announcement are pure: they turn the feed and what the bot already created
+parse_occurrences, plan, announcement and the /calendar-sync replies are pure: they turn the feed and what the bot already created
 into actions. sync downloads the feed and carries the actions out on Discord.
 """
 import asyncio
@@ -38,6 +38,9 @@ EXPANSION_MARGIN = timedelta(days=1)
 
 NO_LOCATION = "See description"
 NO_TITLE = "Untitled event"
+
+# How much of the reason a skipped /calendar-sync reply shows
+REASON_LIMIT = 500
 
 # The reply to the announcement of a cancelled event
 CANCELLED_MESSAGE = "❌ This event has been cancelled."
@@ -388,6 +391,19 @@ def announcement(action, event_url, ping_role=None):
     if ping_role is None:
         return None, embed, discord.AllowedMentions.none()
     return f"<@&{ping_role.id}>", embed, discord.AllowedMentions(everyone=False, users=False, roles=[ping_role])
+
+
+def summary_reply(summary):
+    """The /calendar-sync reply after a sync."""
+    return (f":white_check_mark: Calendar synced: {summary.created} created, {summary.updated} updated,"
+            f" {summary.cancelled} cancelled.")
+
+
+def skipped_reply(error):
+    """The /calendar-sync reply when the sync was skipped because of the FeedError error."""
+    # Error texts can be long or hold backticks, which would break the inline code
+    reason = str(error).replace("`", "'")[:REASON_LIMIT]
+    return f":warning: Calendar sync skipped, nothing changed. Reason: `{reason}`"
 
 
 def _timestamp(moment):
