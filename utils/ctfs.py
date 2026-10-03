@@ -78,6 +78,13 @@ def find_by_category(category_id):
     return None if row is None else _ctf(row)
 
 
+def managed():
+    """The CTFs that are not removed, by start (those without dates last), then in the order they were set up."""
+    with db.transaction() as conn:
+        rows = conn.execute("SELECT * FROM ctfs WHERE removed_at IS NULL ORDER BY start IS NULL, start, id").fetchall()
+    return [_ctf(row) for row in rows]
+
+
 def set_join_message(ctf_id, channel_id, message_id):
     """Remember where the CTF's join message was posted."""
     with db.transaction() as conn:

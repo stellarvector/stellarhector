@@ -19,6 +19,8 @@ For admins, managers and moderators, in the #bot channel of a CTF:
 `/add-player` - Give a member access to the CTF and put them on its player list.
 `/remove-player` - Take a member's access to the CTF away and take them off its player list.
 `/last-call` - Post the CTF's join message again at the bottom of #upcoming-ctfs, as a last call.
+Anywhere:
+`/ctf-status` - Show the CTFs the bot manages: their dates, stage, next automatic step and players.
 In a challenge thread:
 `/unsolve` - Mark a challenge that was marked solved by mistake as unsolved again.
 

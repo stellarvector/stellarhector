@@ -93,6 +93,15 @@ class StoreTest(unittest.TestCase):
         self.assertEqual(ctfs.get(created.id).removed_at, utc(2026, 11, 1))
         self.assertIsNone(ctfs.get(created.id + 1))
 
+    def test_managed_ctfs_are_those_not_removed_by_start_with_those_without_dates_last(self):
+        manual = ctfs.create(new_ctf(name="Manual CTF"))
+        later = ctfs.create(new_ctf(name="Later CTF", ctftime_id=2, start=utc(2026, 11, 1), finish=utc(2026, 11, 2)))
+        sooner = ctfs.create(new_ctf(name="Sooner CTF", ctftime_id=1, start=utc(2026, 10, 1), finish=utc(2026, 10, 2)))
+        removed = ctfs.create(new_ctf(name="Removed CTF"))
+        ctfs.mark_removed(removed.id, utc(2026, 10, 3))
+
+        self.assertEqual(ctfs.managed(), [sooner, later, manual])
+
     def test_has_no_join_message_until_it_is_stored(self):
         created = ctfs.create(new_ctf())
         self.assertEqual((created.join_channel_id, created.join_message_id), (None, None))

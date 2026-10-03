@@ -27,6 +27,7 @@ LOAD_COMMANDS = [
     "archive_channel",
     "release_ctf",
     "lock_ctf",
+    "ctf_status",
     "ctftime_table",
     "calendar_sync",
     "ctftime_check",
