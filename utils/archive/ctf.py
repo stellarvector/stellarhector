@@ -1,13 +1,20 @@
+from utils.archive.category import CategoryArchive
 from utils.archive.challenge import ChallengeArchive
+from utils.archive.naming import normalize_name, relative_link, unique_name
 from git import Repo
 import asyncio
 import datetime
 import core.bot as bot
 import os
 
+# The folder of a CTF's archive (and of each category in it) has its attachments in this folder
+ATTACHMENTS_FOLDER = "attachments"
+
 class CtfArchive():
+    """A CTF's archive: a page for its main channel, with its threads inline, and a folder per category channel with
+    the category's page and a page per challenge thread (utils.archive.category)."""
     @classmethod
-    async def init(cls, ctf, challenges):
+    async def init(cls, ctf, main_channel, category_channels):
         self = CtfArchive()
 
         # First sync archive repository
@@ -15,9 +22,16 @@ class CtfArchive():
 
         self.name = ctf
         self.year = datetime.datetime.now().year
-        self.__challenges: list[ChallengeArchive] = [
-            await ChallengeArchive.init(channel)
-                for channel in challenges
+
+        self.__main: ChallengeArchive | None = None
+        if main_channel is not None:
+            self.__main = await ChallengeArchive.init(main_channel)
+            self.__main.path = f"{normalize_name(main_channel.name, fallback=f'channel-{main_channel.id}')}.html"
+
+        taken = {ATTACHMENTS_FOLDER}
+        self.__categories: list[CategoryArchive] = [
+            await CategoryArchive.init(channel, unique_name(channel.name, taken, fallback=f"channel-{channel.id}"))
+                for channel in category_channels
         ]
 
         return self
@@ -25,29 +39,69 @@ class CtfArchive():
     def generate_files(self):
         archive_path = bot.config.get("ARCHIVE_LOCAL_PATH")
 
+        pages = self.pages()
+        if not pages:
+            raise RuntimeError("The CTF has no channels to archive")
+
         self.add_year_if_necessary(archive_path)
         ctf_path = self.create_ctf_path(archive_path)
 
         if not ctf_path:
-            raise RuntimeException("No CTF name could be found")
+            raise RuntimeError("No CTF name could be found")
 
-        self.add_ctf_to_year_index(archive_path, ctf_path)
+        self.add_ctf_to_year_index(archive_path, ctf_path, pages[0].path)
 
-        os.makedirs(f"{archive_path}/{self.year}/{ctf_path}/attachments")
+        ctf_folder = f"{self.year}/{ctf_path}"
+        if self.__main is not None:
+            self.write_page(archive_path, ctf_folder, self.__main, self.__main.fetch_data(
+                self.attachment_folder(archive_path, ctf_folder)))
 
-        for challenge in self.__challenges:
-            challenge_data = challenge.fetch_data(f"/{self.year}/{ctf_path}/attachments")
+        for category in self.__categories:
+            attachments = self.attachment_folder(archive_path, f"{ctf_folder}/{category.folder}")
+            self.write_page(archive_path, ctf_folder, category, category.fetch_data(attachments))
 
-            challenge_template = bot.jinja_env.get_template("challenge.html")
-            challenge_html = challenge_template.render(
-                year=self.year,
-                ctf_name=self.name,
-                challenge_name=challenge.name,
-                challenges=self.__challenges,
-                messages=challenge_data)
+            for challenge in category.challenges:
+                self.write_page(archive_path, ctf_folder, challenge, challenge.fetch_data(attachments))
 
-            with open(f"{archive_path}/{self.year}/{ctf_path}/{challenge.name}.html", "w+") as f:
-                f.write(challenge_html)
+    def pages(self):
+        """Every page of the archive, in the order of the navigation."""
+        main = [] if self.__main is None else [self.__main]
+        return main + [page for category in self.__categories for page in [category, *category.challenges]]
+
+    @staticmethod
+    def attachment_folder(archive_path, folder):
+        """Create the attachments folder in the folder (relative to the archive) and return its path from the
+        archive's root, which is where attachments are downloaded to."""
+        os.makedirs(os.path.join(archive_path, folder, ATTACHMENTS_FOLDER), exist_ok=True)
+        return f"/{folder}/{ATTACHMENTS_FOLDER}"
+
+    def write_page(self, archive_path, ctf_folder, page, messages):
+        def link(to_page):
+            return relative_link(page.path, to_page)
+
+        navigation = []
+        if self.__main is not None:
+            navigation.append({"name": self.__main.name, "link": link(self.__main.path), "challenges": []})
+        navigation += [{
+            "name": category.name,
+            "link": link(category.path),
+            "challenges": [{"name": challenge.name, "link": link(challenge.path)} for challenge in category.challenges],
+        } for category in self.__categories]
+
+        page_template = bot.jinja_env.get_template("ctf_page.html")
+        page_html = page_template.render(
+            year=self.year,
+            ctf_name=self.name,
+            page_name=page.name,
+            # The common folder is next to the year folders
+            stylesheet=link("../../common/archive.css"),
+            codehilite_stylesheet=link("../../common/codehilite.css"),
+            year_index=link("../index.html"),
+            navigation=navigation,
+            messages=messages)
+
+        with open(os.path.join(archive_path, ctf_folder, page.path), "w+") as f:
+            f.write(page_html)
 
     def add_year_if_necessary(self, archive_path):
         year_folder_path = os.path.join(archive_path, str(self.year))
@@ -86,9 +140,9 @@ class CtfArchive():
 
         return ctf_path
 
-    def add_ctf_to_year_index(self, archive_path, ctf_path):
+    def add_ctf_to_year_index(self, archive_path, ctf_path, first_page):
         ctf_link_template = bot.jinja_env.get_template("ctflink.html")
-        ctf_link_html = ctf_link_template.render(ctf={"link": f"./{ctf_path}/{self.__challenges[0].name}.html", "name": self.name})
+        ctf_link_html = ctf_link_template.render(ctf={"link": f"./{ctf_path}/{first_page}", "name": self.name})
 
         year_index_path = os.path.join(archive_path, str(self.year), "index.html")
         with open(year_index_path, "r+") as year_file:

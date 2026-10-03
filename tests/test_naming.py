@@ -1,5 +1,5 @@
 import unittest
-from utils.archive.naming import normalize_name
+from utils.archive.naming import normalize_name, relative_link, unique_name
 
 
 class NormalizeNameTest(unittest.TestCase):
@@ -29,6 +29,46 @@ class NormalizeNameTest(unittest.TestCase):
 
     def test_default_fallback(self):
         self.assertEqual(normalize_name("🔥🔥"), "unnamed")
+
+
+class UniqueNameTest(unittest.TestCase):
+    def test_normalizes_the_name(self):
+        self.assertEqual(unique_name("✅ sqli", set()), "sqli")
+
+    def test_takes_the_name(self):
+        taken = set()
+        unique_name("sqli", taken)
+        self.assertEqual(taken, {"sqli"})
+
+    def test_numbers_a_name_that_is_taken(self):
+        taken = {"sqli"}
+        self.assertEqual(unique_name("✅ sqli", taken), "sqli-2")
+        self.assertEqual(unique_name("sqli", taken), "sqli-3")
+
+    def test_uses_the_fallback_when_nothing_remains(self):
+        self.assertEqual(unique_name("🔥", set(), fallback="thread-42"), "thread-42")
+
+
+class RelativeLinkTest(unittest.TestCase):
+    def test_between_pages_in_the_same_folder(self):
+        self.assertEqual(relative_link("web/sqli.html", "web/xss.html"), "xss.html")
+
+    def test_down_into_a_folder(self):
+        self.assertEqual(relative_link("foo-ctf.html", "web/sqli.html"), "web/sqli.html")
+
+    def test_up_out_of_a_folder(self):
+        self.assertEqual(relative_link("web/sqli.html", "foo-ctf.html"), "../foo-ctf.html")
+
+    def test_across_folders(self):
+        self.assertEqual(relative_link("web/sqli.html", "crypto/index.html"), "../crypto/index.html")
+
+    def test_above_the_root(self):
+        self.assertEqual(relative_link("web/sqli.html", "../index.html"), "../../index.html")
+        self.assertEqual(relative_link("foo-ctf.html", "../index.html"), "../index.html")
+
+    def test_far_above_the_root(self):
+        self.assertEqual(relative_link("foo-ctf.html", "../../../common/archive.css"), "../../../common/archive.css")
+        self.assertEqual(relative_link("web/sqli.html", "../../../common/archive.css"), "../../../../common/archive.css")
 
 
 if __name__ == "__main__":
