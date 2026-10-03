@@ -58,8 +58,9 @@ if __name__ == "__main__":
             if bot.channel_id(key) is None:
                 logger.warning(f"{key} is not configured, the feature using it is switched off")
         bot.init()
-        ctf_join.register(bot.client, ctf_join.JoinRoles(trusted=frozenset(bot.TRUSTED_PLAYER_ROLES),
-                                                         player=bot.PLAYER_ROLE))
+        ctf_join.register(bot.client,
+                          ctf_join.JoinRoles(trusted=frozenset(bot.TRUSTED_PLAYER_ROLES), player=bot.PLAYER_ROLE),
+                          ctf_join.ApprovalRoles(staff=frozenset(bot.STAFF_ROLES), known_player=bot.KNOWN_PLAYER_ROLE))
         events.load(LOAD_EVENTS)
         events.register(LOAD_EVENTS)
         commands.load(LOAD_COMMANDS)

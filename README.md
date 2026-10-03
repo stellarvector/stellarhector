@@ -110,11 +110,19 @@ The join message shows the CTF's name, CTFtime link, start and finish, the on-ca
 Its **Join** button, answered only to whoever clicks it:
 
 - core players, known players and staff get the CTF role and are on the player list right away;
-- players are put on the list as `pending`, and a card in the CTF's #bot asks a moderator to let them in with `/add-player`; clicking again while pending posts no second card;
+- players are put on the list as `pending`, and an approval card is posted in the CTF's #bot (see below); clicking again while pending posts no second card;
 - anyone else is told to ask a moderator;
 - once the CTF is released or locked, joining is closed.
 
-The **Leave** button on the guide takes the CTF role away and takes the player off the list. Both buttons keep working after a restart: their `custom_id` holds the CTF's ID (`ctf:join:<id>`, `ctf:leave:<id>`), and `ctf_join.register()` handles them for every CTF at startup. The logic is in `utils/ctf_join.py`.
+The **Leave** button on the guide takes the CTF role away and takes the player off the list.
+
+The approval card shows who asks to join, their roles, when they joined the server and how many CTFs they joined before. Only admins, managers and moderators can use its buttons (anyone else gets a reply only they see):
+
+- **Accept** gives the CTF role and marks the player `joined`; **Accept + known player** also gives `KNOWN_PLAYER_ROLE`, so they join right away from then on (the button is left out when that role is not set);
+- **Decline** takes them off the list, so they can click Join again later, and DMs them to go see a moderator on-site;
+- the card then loses its buttons and says who decided what, e.g. "✅ Accepted by @mod" or "❌ Declined by @mod (DM failed)" (if the card can't be edited, the decision still stands and the clicker is told). A click on a card that was already handled, or whose player left the CTF or asked again since, only gets a reply that it was already handled. Someone who left the server can only be declined (the card says "left the server").
+
+All these buttons keep working after a restart: their `custom_id` holds the CTF's ID (`ctf:join:<id>`, `ctf:leave:<id>`, and `ctf:card:<accept|known|decline>:<id>:<user id>` on approval cards), and `ctf_join.register()` handles them for every CTF at startup. The logic is in `utils/ctf_join.py`.
 
 ### Where CTF commands run
 

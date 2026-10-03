@@ -180,6 +180,26 @@ class PlayersTest(unittest.TestCase):
 
         self.assertEqual(ctfs.players(other.id), [])
 
+    def test_reopened_request_waits_on_its_card_again_whether_or_not_they_are_on_the_list(self):
+        ctfs.add_player(self.ctf.id, 42, utc(2026, 10, 4, 12))
+
+        ctfs.reopen_request(self.ctf.id, 42, utc(2026, 10, 3, 12), 77)
+        ctfs.reopen_request(self.ctf.id, 43, utc(2026, 10, 3, 13), 78)
+
+        self.assertEqual(ctfs.players(self.ctf.id), [
+            ctfs.Player(user_id=42, status="pending", approval_card_message_id=77, joined_at=utc(2026, 10, 3, 12)),
+            ctfs.Player(user_id=43, status="pending", approval_card_message_id=78, joined_at=utc(2026, 10, 3, 13))])
+
+    def test_times_joined_counts_the_ctfs_the_user_joined_not_those_they_wait_for(self):
+        other, third = ctfs.create(new_ctf(name="Bar CTF")), ctfs.create(new_ctf(name="Baz CTF"))
+        ctfs.add_player(self.ctf.id, 42, utc(2026, 10, 3, 12))
+        ctfs.add_player(other.id, 42, utc(2026, 10, 3, 12))
+        ctfs.add_pending_player(third.id, 42, utc(2026, 10, 3, 12))
+        ctfs.add_player(third.id, 43, utc(2026, 10, 3, 12))
+
+        self.assertEqual(ctfs.times_joined(42), 2)
+        self.assertEqual(ctfs.times_joined(99), 0)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -134,6 +134,17 @@ def set_approval_card(ctf_id, user_id, message_id):
                      (message_id, ctf_id, user_id))
 
 
+def reopen_request(ctf_id, user_id, at, message_id):
+    """Put the user back on the CTF's player list as pending since at, waiting on the approval card with this message
+    ID, whether they are on the list now or not."""
+    with db.transaction() as conn:
+        conn.execute(
+            "INSERT INTO ctf_players (ctf_id, user_id, status, approval_card_message_id, joined_at)"
+            " VALUES (?, ?, 'pending', ?, ?) ON CONFLICT (ctf_id, user_id) DO UPDATE SET status = 'pending',"
+            " approval_card_message_id = excluded.approval_card_message_id, joined_at = excluded.joined_at",
+            (ctf_id, user_id, message_id, db.time_text(at)))
+
+
 def remove_player(ctf_id, user_id):
     """Take the user off the CTF's player list; nothing happens when they are not on it."""
     with db.transaction() as conn:
@@ -153,6 +164,13 @@ def players(ctf_id):
         rows = conn.execute("SELECT * FROM ctf_players WHERE ctf_id = ? ORDER BY joined_at, user_id",
                             (ctf_id,)).fetchall()
     return [_player(row) for row in rows]
+
+
+def times_joined(user_id):
+    """How many CTFs the user has joined (not counting those where they wait for a moderator)."""
+    with db.transaction() as conn:
+        return conn.execute("SELECT COUNT(*) FROM ctf_players WHERE user_id = ? AND status = 'joined'",
+                            (user_id,)).fetchone()[0]
 
 
 def _player(row):
