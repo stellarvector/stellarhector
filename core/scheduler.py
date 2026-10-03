@@ -21,6 +21,8 @@ TICK_SLACK = timedelta(minutes=1)
 TICK_INTERVAL = timedelta(minutes=5)
 DEFAULT_TIMEOUT = timedelta(minutes=4)
 DEFAULT_WATCHDOG_LIMIT = timedelta(minutes=20)
+# While a job runs the runner keeps beating this often, so a job may get a timeout longer than the watchdog limit
+JOB_BEAT_INTERVAL = timedelta(minutes=1)
 
 _jobs = []
 _watchdog_limit = DEFAULT_WATCHDOG_LIMIT
@@ -29,10 +31,7 @@ _tick_loop = None
 
 @dataclass
 class Job:
-    """When to run is decided by is_due; run should be a plain action that a slash command can call too.
-
-    The timeout must stay below the watchdog limit, or a slow run gets the bot restarted.
-    """
+    """When to run is decided by is_due; run should be a plain action that a slash command can call too."""
     name: str
     is_due: Callable[[datetime, Optional[datetime]], bool]
     run: Callable[[], Awaitable[None]]
@@ -76,13 +75,31 @@ async def run_due_jobs(jobs, now, heartbeat=lambda: None):
             continue
 
         try:
-            # A job that swallows the cancellation keeps the tick waiting; the watchdog catches that case
-            await asyncio.wait_for(job.run(), timeout=job.timeout.total_seconds())
+            await _beating_during(asyncio.wait_for(job.run(), timeout=job.timeout.total_seconds()), job.timeout, heartbeat)
         except Exception:
             logging.getLogger("bot").exception(f"Scheduled job {job.name} failed (timeout {job.timeout})")
             continue
 
         _set_last_run_at(job.name, now)
+
+
+async def _beating_during(awaitable, timeout, heartbeat):
+    """Await while beating every JOB_BEAT_INTERVAL, for at most timeout.
+
+    Beats stop after the timeout, so a job that swallows its cancellation and keeps the tick waiting
+    is still caught by the watchdog, as is a blocked event loop (no beats run then).
+    """
+    async def beat():
+        beats = int(timeout / JOB_BEAT_INTERVAL)
+        for _ in range(beats):
+            await asyncio.sleep(JOB_BEAT_INTERVAL.total_seconds())
+            heartbeat()
+
+    beating = asyncio.create_task(beat())
+    try:
+        return await awaitable
+    finally:
+        beating.cancel()
 
 
 def _last_run_at(name):

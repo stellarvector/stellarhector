@@ -1,4 +1,5 @@
 import unittest
+from datetime import timedelta
 from core import config
 
 
@@ -41,3 +42,26 @@ class TimezoneTest(unittest.TestCase):
     def test_unknown_zone_falls_back_to_default(self):
         with self.assertLogs("bot", level="WARNING"):
             self.assertEqual(config.timezone({"TIMEZONE": "Europe/Brusels"}), "Europe/Brussels")
+
+
+class WatchdogLimitTest(unittest.TestCase):
+    DEFAULT = timedelta(minutes=20)
+    TICK = timedelta(minutes=5)
+
+    def limit(self, values):
+        return config.watchdog_limit(values, self.DEFAULT, self.TICK)
+
+    def test_defaults_when_unset(self):
+        self.assertEqual(self.limit({}), self.DEFAULT)
+        self.assertEqual(self.limit({"WATCHDOG_TIMEOUT_MINUTES": ""}), self.DEFAULT)
+
+    def test_uses_configured_minutes(self):
+        self.assertEqual(self.limit({"WATCHDOG_TIMEOUT_MINUTES": "6"}), timedelta(minutes=6))
+
+    def test_not_a_number_falls_back_to_default(self):
+        with self.assertLogs("bot", level="WARNING"):
+            self.assertEqual(self.limit({"WATCHDOG_TIMEOUT_MINUTES": "twenty"}), self.DEFAULT)
+
+    def test_not_longer_than_a_tick_falls_back_to_default(self):
+        with self.assertLogs("bot", level="WARNING"):
+            self.assertEqual(self.limit({"WATCHDOG_TIMEOUT_MINUTES": "5"}), self.DEFAULT)

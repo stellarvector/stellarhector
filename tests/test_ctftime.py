@@ -45,6 +45,9 @@ class ParseCtftimeIdTest(unittest.TestCase):
     def test_with_www(self):
         self.assertEqual(ctftime.parse_ctftime_id("http://www.ctftime.org/event/2500/"), 2500)
 
+    def test_any_case(self):
+        self.assertEqual(ctftime.parse_ctftime_id("https://CTFtime.org/Event/2500"), 2500)
+
     def test_link_inside_text(self):
         self.assertEqual(ctftime.parse_ctftime_id("Let's play <https://ctftime.org/event/2583> this weekend!"), 2583)
 

@@ -222,6 +222,39 @@ class RunDueJobsTest(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(events, ["beat", "a", "beat", "b"])
 
+    async def test_keeps_beating_while_a_long_job_runs(self):
+        beats = []
+
+        async def slow():
+            await asyncio.sleep(0.35)
+
+        original = scheduler.JOB_BEAT_INTERVAL
+        scheduler.JOB_BEAT_INTERVAL = timedelta(seconds=0.1)
+        self.addCleanup(setattr, scheduler, "JOB_BEAT_INTERVAL", original)
+
+        job = scheduler.Job("slow", always_due, slow, timeout=timedelta(seconds=1))
+        await scheduler.run_due_jobs([job], utc(2026, 10, 3, 12, 0), heartbeat=lambda: beats.append(1))
+
+        self.assertGreaterEqual(len(beats), 3)  # the one before the job, then one per interval while it runs
+
+    async def test_stops_beating_after_the_job_timeout(self):
+        beats = []
+
+        async def swallows_cancellation():
+            try:
+                await asyncio.sleep(10)
+            except asyncio.CancelledError:
+                await asyncio.sleep(0.5)
+
+        original = scheduler.JOB_BEAT_INTERVAL
+        scheduler.JOB_BEAT_INTERVAL = timedelta(seconds=0.05)
+        self.addCleanup(setattr, scheduler, "JOB_BEAT_INTERVAL", original)
+
+        job = scheduler.Job("stuck", always_due, swallows_cancellation, timeout=timedelta(seconds=0.1))
+        await scheduler.run_due_jobs([job], utc(2026, 10, 3, 12, 0), heartbeat=lambda: beats.append(1))
+
+        self.assertLessEqual(len(beats), 3)  # before the job, then at most timeout / interval
+
 
 class FakeClock:
     def __init__(self):

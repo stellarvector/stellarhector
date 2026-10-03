@@ -49,7 +49,7 @@ Features read these with `bot.channel_id("ADMIN_CHANNEL_ID")`, which returns `No
 
 `core/scheduler.py` runs one loop inside the bot that wakes up every 5 minutes and runs the jobs that are due. A feature registers a job with `scheduler.register(scheduler.Job(name, is_due, run))`, where `is_due` comes from `every_minutes(n)`, `daily_at("HH:MM", tz)` or `monthly_on(day, "HH:MM", tz)` and `run` is a plain async function that a slash command can call too. The last successful run of each job is kept in the `job_runs` table, so a daily or monthly job does not run twice after a restart. A new daily or monthly job first runs at its next slot, not right after deploy.
 
-If a job raises or runs longer than its timeout (4 minutes by default, keep it below the watchdog limit), it is logged and retried on the next tick. If the loop itself crashes, it is restarted. If the event loop gets blocked and no tick happens for `WATCHDOG_TIMEOUT_MINUTES`, a watchdog thread logs a critical message and exits the process, and Docker's `restart: always` starts it again. Blocking work (such as the git push of the archiver) must go through `asyncio.to_thread` so it does not stop the ticks.
+If a job raises or runs longer than its timeout (4 minutes by default; a job may ask for a longer one, the scheduler keeps beating while it runs), it is logged and retried on the next tick. If the loop itself crashes, it is restarted. If the event loop gets blocked and no tick happens for `WATCHDOG_TIMEOUT_MINUTES`, a watchdog thread logs a critical message and exits the process, and Docker's `restart: always` starts it again. Blocking work (such as the git push of the archiver) must go through `asyncio.to_thread` so it does not stop the ticks.
 
 ### Checking the watchdog by hand
 
@@ -70,7 +70,7 @@ If a job raises or runs longer than its timeout (4 minutes by default, keep it b
 `utils/ctftime.py` is the shared CTFtime client:
 
 - `await get_event(id)` returns an `Event` (id, title, start, finish as UTC datetimes, format, weight, onsite, url, ctftime_url), or `None` when CTFtime answers 404.
-- `await list_events(start, finish)` returns every event starting in `[start, finish)`. CTFtime filters on an event's finish and ignores `offset`, so the client asks 30 days past `finish`, pages by moving `start` forward, and drops what starts outside the range.
+- `await list_events(start, finish)` returns every event starting in `[start, finish)`. CTFtime filters on an event's finish and ignores `offset`, so the client asks a year past `finish`, pages by moving `start` forward, and drops what starts outside the range.
 - `parse_ctftime_id(text)` returns the id from the first `ctftime.org/event/<id>` link in a text, or `None`.
 
 Network errors, timeouts, error responses other than a 404 on an event, and responses that are not the expected JSON raise `CtftimeError`. `list_events` relies on CTFtime sorting events by start (checked against the live API).

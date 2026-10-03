@@ -35,7 +35,10 @@ def close():
 
 @contextmanager
 def transaction():
-    """Run queries in one transaction. Never await inside it: all code shares one connection."""
+    """Run queries in one transaction. Never await inside it: all code shares one connection.
+
+    Only call it from the event loop thread (not from asyncio.to_thread work): the connection belongs to that thread.
+    """
     if _conn is None:
         raise RuntimeError("Database not initialised, call db.init() first")
 

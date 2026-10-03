@@ -8,8 +8,9 @@ import aiohttp
 API_URL = "https://ctftime.org/api/v1"
 
 # CTFtime filters on an event's finish, not its start, so ask this much further
-# to also get the events that start in the range but finish after it
-FINISH_MARGIN = timedelta(days=30)
+# to also get the events that start in the range but finish after it. Results are sorted by start
+# and paging stops at finish, so a wide margin costs nothing extra.
+FINISH_MARGIN = timedelta(days=365)
 
 # CTFtime does not cap limit, but smaller pages keep each response small
 PAGE_SIZE = 100
@@ -18,7 +19,7 @@ PAGE_SIZE = 100
 USER_AGENT = "Mozilla/5.0 (X11; Linux x86_64; rv:128.0) Gecko/20100101 Firefox/128.0"
 TIMEOUT = aiohttp.ClientTimeout(total=30)
 
-_EVENT_LINK = re.compile(r"ctftime\.org/event/(\d+)")
+_EVENT_LINK = re.compile(r"ctftime\.org/event/(\d+)", re.IGNORECASE)
 
 
 class CtftimeError(Exception):
