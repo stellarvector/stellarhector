@@ -39,11 +39,15 @@ EXPANSION_MARGIN = timedelta(days=1)
 NO_LOCATION = "See description"
 NO_TITLE = "Untitled event"
 
+# The reply to the announcement of a cancelled event
+CANCELLED_MESSAGE = "❌ This event has been cancelled."
+
 DOWNLOAD_TIMEOUT = aiohttp.ClientTimeout(total=30)
 
 
-# What the bot remembers of an occurrence it created an event for; announcement_message_id is None when not announced
-StoredOccurrence = namedtuple("StoredOccurrence", ["discord_event_id", "announcement_message_id"])
+# What the bot remembers of an occurrence it created an event for; announcement_message_id is None when not announced,
+# and end is the end the occurrence had in the calendar at the last sync
+StoredOccurrence = namedtuple("StoredOccurrence", ["discord_event_id", "announcement_message_id", "end"])
 
 
 class FeedError(Exception):
@@ -70,7 +74,7 @@ class Occurrence:
     def key(self):
         """What identifies the occurrence across syncs: its UID and its slot in UTC, or only its UID when it does not
         recur, so moving it keeps the key."""
-        return self.uid, "" if self.slot is None else _slot_key(self.slot)
+        return self.uid, "" if self.slot is None else _utc_text(self.slot)
 
 
 @dataclass(frozen=True)
@@ -101,6 +105,19 @@ class Recreate:
     """Create the bot's Discord event for occurrence again: it was deleted in Discord."""
     occurrence: Occurrence
     details: EventDetails
+
+
+@dataclass(frozen=True)
+class Cancel:
+    """Delete the bot's Discord event for the occurrence with key and tell the announcement: it is gone from the
+    calendar or cancelled there."""
+    key: tuple
+
+
+@dataclass(frozen=True)
+class Prune:
+    """Forget the occurrence with key, deleting its Discord event when that is still there: it is over."""
+    key: tuple
 
 
 @dataclass(frozen=True)
@@ -152,22 +169,28 @@ def _occurrences(expanded, zone, recurring):
 def _find(calendar, key, zone, recurring):
     """The occurrence with key wherever it is in time, in a list that is empty when it is not in the calendar.
 
-    An occurrence outside the window is a one-off event or an override in a series (RECURRENCE-ID) that was moved:
-    an occurrence a series' rule makes starts at its slot, which was in the window.
+    An occurrence outside the window is a one-off event or an override in a series (RECURRENCE-ID) that was moved,
+    or an occurrence a series' rule makes at its slot, which was in the window when the window was longer.
     """
     uid, slot = key
     events = [component for component in calendar.walk("VEVENT") if _uid(component) == uid]
-    if uid in recurring:
-        events = [event for event in events if "RECURRENCE-ID" in event
-                  and _slot_key(_slot(event.decoded("RECURRENCE-ID"), zone)) == slot]
-    elif slot:
+    if uid not in recurring and slot:
         return []
+    overrides = [event for event in events if "RECURRENCE-ID" in event
+                 and _utc_text(_slot(event.decoded("RECURRENCE-ID"), zone)) == slot]
 
-    # The event on its own, with the calendar's timezones, so expanding it gives just its one occurrence
+    # The event on its own, with the calendar's timezones, so expanding it gives just its occurrences
     alone = icalendar.Calendar(calendar)
-    alone.subcomponents = [component for component in calendar.subcomponents if component.name != "VEVENT"] + events
-    expanded = _expand(lambda: recurring_ical_events.of(alone).all())
-    return [occurrence for occurrence in _occurrences(expanded, zone, recurring) if occurrence.key == key]
+    others = [component for component in calendar.subcomponents if component.name != "VEVENT"]
+    if uid not in recurring or overrides:
+        alone.subcomponents = others + (overrides or events)
+        expansion = lambda: recurring_ical_events.of(alone).all()
+    else:
+        # The rule goes on forever, so the series is only expanded around the slot
+        alone.subcomponents = others + events
+        start = datetime.fromisoformat(slot)
+        expansion = lambda: recurring_ical_events.of(alone).between(start - EXPANSION_MARGIN, start + EXPANSION_MARGIN)
+    return [occurrence for occurrence in _occurrences(_expand(expansion), zone, recurring) if occurrence.key == key]
 
 
 def _expand(expansion):
@@ -241,8 +264,9 @@ def _slot(recurrence_id, zone):
     return _start_of_day(recurrence_id, zone)
 
 
-def _slot_key(slot):
-    return slot.astimezone(timezone.utc).isoformat()
+def _utc_text(moment):
+    """moment as stored and in keys: a UTC ISO-8601 string."""
+    return moment.astimezone(timezone.utc).isoformat()
 
 
 def _to_utc(moment, zone):
@@ -260,13 +284,15 @@ def _end_of_day(day, zone):
     return datetime.combine(day, END_OF_DAY, zone)
 
 
-def plan(occurrences, known, now, lookahead):
+def plan(occurrences, known, ends, now, lookahead):
     """The actions that bring Discord in line with the feed. known maps the key of each occurrence the bot
     already created an event for to the EventDetails that event has in Discord now, or None when it is gone
-    from Discord.
+    from Discord; ends maps those keys to the end the occurrence had in the calendar at the last sync.
 
     New occurrences are created when they are in scope; the events of known ones are kept matching the feed
-    wherever they moved to.
+    wherever they moved to. Known occurrences that are over are pruned, and the ones missing from occurrences
+    are cancelled: parse_occurrences finds known occurrences wherever they moved to, so they are gone from the feed
+    or cancelled in it.
     """
     earliest_start = now + START_DELAY
     handled = set()
@@ -275,6 +301,9 @@ def plan(occurrences, known, now, lookahead):
         if occurrence.key in handled:
             continue
         handled.add(occurrence.key)
+        if occurrence.key in known and occurrence.end <= now:
+            actions.append(Prune(occurrence.key))
+            continue
         # Discord needs the end after the start, so one ending before Discord would let it start is as good as over
         if occurrence.end <= max(occurrence.start, earliest_start):
             continue
@@ -295,6 +324,10 @@ def plan(occurrences, known, now, lookahead):
             details = replace(details, start=current.start)
         if details != current:
             actions.append(Update(occurrence, details))
+
+    for key in sorted(known.keys() - handled):
+        # An occurrence of a series is no longer in the feed once it is over, as far as the expansion goes
+        actions.append(Prune(key) if ends[key] <= now else Cancel(key))
     return actions
 
 
@@ -377,8 +410,10 @@ async def download(url):
 
 async def sync(guild, ics_url, tz, lookahead, announce_channel=None, ping_role=None, fetch=download):
     """Download the feed and bring the bot's Discord events in line with it: create an event, with an announcement
-    in announce_channel when it is set, for every occurrence in scope that has none yet, and quietly update or
-    recreate the events the bot created before. Returns a Summary.
+    in announce_channel when it is set, for every occurrence in scope that has none yet, quietly update or
+    recreate the events the bot created before, and delete the ones cancelled in the calendar with a reply to their
+    announcement. Occurrences that are over are forgotten, and their events quietly deleted when Discord still has
+    them. Returns a Summary.
 
     Raises FeedError, before anything changes, when the feed can't be downloaded or parsed, and discord.HTTPException
     when the server's events can't be read. An event that Discord refuses is logged and tried again on the next sync.
@@ -388,10 +423,19 @@ async def sync(guild, ics_url, tz, lookahead, announce_channel=None, ping_role=N
     occurrences = parse_occurrences(await fetch(ics_url), tz, now, lookahead, stored.keys())
     events = await _events(guild, stored)
     in_discord = {key: None if event is None else _details_in_discord(event) for key, event in events.items()}
-    actions = plan(occurrences, in_discord, now, lookahead)
+    ends = {key: occurrence.end for key, occurrence in stored.items()}
+    actions = plan(occurrences, in_discord, ends, now, lookahead)
 
-    created = updated = 0
+    created = updated = cancelled = 0
     for action in actions:
+        if isinstance(action, Prune):
+            await _delete_and_forget(events[action.key], action.key)
+            continue
+        if isinstance(action, Cancel):
+            if await _cancel(events[action.key], announce_channel, stored[action.key].announcement_message_id, action.key):
+                cancelled += 1
+            continue
+
         key = action.occurrence.key
         try:
             if isinstance(action, Update):
@@ -415,7 +459,7 @@ async def sync(guild, ics_url, tz, lookahead, announce_channel=None, ping_role=N
             if announce_channel is not None and message_id is not None:
                 await _edit_announcement(announce_channel, message_id, action, event, ping_role)
 
-    return Summary(created=created, updated=updated)
+    return Summary(created=created, updated=updated, cancelled=cancelled)
 
 
 def _details_in_discord(event):
@@ -469,13 +513,14 @@ async def _create(guild, action):
             description=details.description or discord.utils.MISSING,
         )
         uid, slot = action.occurrence.key
+        end = _utc_text(action.occurrence.end)
         with db.transaction() as conn:
             if isinstance(action, Recreate):
-                conn.execute("UPDATE calendar_occurrences SET discord_event_id = ? WHERE uid = ? AND start = ?",
-                             (event.id, uid, slot))
+                conn.execute("UPDATE calendar_occurrences SET discord_event_id = ?, end_time = ? WHERE uid = ? AND start = ?",
+                             (event.id, end, uid, slot))
             else:
-                conn.execute("INSERT INTO calendar_occurrences (uid, start, discord_event_id) VALUES (?, ?, ?)",
-                             (uid, slot, event.id))
+                conn.execute("INSERT INTO calendar_occurrences (uid, start, discord_event_id, end_time) VALUES (?, ?, ?, ?)",
+                             (uid, slot, event.id, end))
         return event
 
     # Shielded: when the job times out mid-create, the event is still remembered once Discord made it
@@ -483,7 +528,8 @@ async def _create(guild, action):
 
 
 async def _update(event, action):
-    """event edited to match action, or None when it is too late to move its start."""
+    """event edited to match action, with the occurrence's new end remembered, or None when it is too late to move
+    its start."""
     details = action.details
     changes = {}
     # The start is only sent when it changed, and never for a running event: Discord won't move its start
@@ -492,8 +538,54 @@ async def _update(event, action):
         if start is None:
             return None
         changes["start_time"] = start
-    return await event.edit(name=details.name, description=details.description, location=details.location,
-                            end_time=details.end, **changes)
+
+    async def edit_and_remember():
+        edited = await event.edit(name=details.name, description=details.description, location=details.location,
+                                  end_time=details.end, **changes)
+        uid, slot = action.occurrence.key
+        with db.transaction() as conn:
+            conn.execute("UPDATE calendar_occurrences SET end_time = ? WHERE uid = ? AND start = ?",
+                         (_utc_text(action.occurrence.end), uid, slot))
+        return edited
+
+    # Shielded like create_and_remember, so the end stays the one Discord has
+    return await asyncio.shield(edit_and_remember())
+
+
+async def _cancel(event, channel, message_id, key):
+    """Delete event when it is still in Discord, forget the occurrence and reply to its announcement. Returns whether
+    it was cancelled: when Discord refuses the delete, it is tried again on the next sync.
+
+    The occurrence is forgotten before replying, so the reply is posted at most once; a failed reply is only logged.
+    """
+    if not await _delete_and_forget(event, key):
+        return False
+
+    if channel is not None and message_id is not None:
+        try:
+            await channel.get_partial_message(message_id).reply(CANCELLED_MESSAGE, mention_author=False,
+                                                                allowed_mentions=discord.AllowedMentions.none())
+        except discord.HTTPException:
+            logging.getLogger("bot").exception(f"Could not reply to the announcement of cancelled calendar occurrence {key}")
+    return True
+
+
+async def _delete_and_forget(event, key):
+    """Delete event when it is still in Discord and forget the occurrence with key. Returns False when Discord refused
+    the delete: that is logged, and the occurrence is kept so the next sync tries again."""
+    if event is not None:
+        try:
+            await event.delete()
+        except discord.NotFound:
+            pass
+        except discord.HTTPException:
+            logging.getLogger("bot").exception(f"Discord refused deleting the event for calendar occurrence {key}")
+            return False
+
+    uid, slot = key
+    with db.transaction() as conn:
+        conn.execute("DELETE FROM calendar_occurrences WHERE uid = ? AND start = ?", (uid, slot))
+    return True
 
 
 async def _announce(channel, action, event, ping_role):
@@ -523,6 +615,7 @@ async def _edit_announcement(channel, message_id, action, event, ping_role):
 def _stored_occurrences():
     """The StoredOccurrence per occurrence key the bot created an event for."""
     with db.transaction() as conn:
-        return {(row["uid"], row["start"]): StoredOccurrence(row["discord_event_id"], row["announcement_message_id"])
-                for row in conn.execute("SELECT uid, start, discord_event_id, announcement_message_id "
+        return {(row["uid"], row["start"]): StoredOccurrence(row["discord_event_id"], row["announcement_message_id"],
+                                                             datetime.fromisoformat(row["end_time"]))
+                for row in conn.execute("SELECT uid, start, discord_event_id, announcement_message_id, end_time "
                                         "FROM calendar_occurrences")}

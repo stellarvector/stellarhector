@@ -5,10 +5,11 @@ from zoneinfo import ZoneInfo
 import discord
 
 from utils import calendar_sync
-from utils.calendar_sync import Create, EventDetails, Occurrence, Recreate, Update
+from utils.calendar_sync import Cancel, Create, EventDetails, Occurrence, Prune, Recreate, Update
 
 NOW = datetime(2026, 10, 3, 12, 0, tzinfo=timezone.utc)
 WINDOW = timedelta(days=30)
+FUTURE = NOW + timedelta(days=7)
 
 
 def utc(*args):
@@ -27,8 +28,12 @@ def event(name="Weekly meeting", description="", location="See description", sta
     return EventDetails(name=name, description=description, location=location, start=start, end=end)
 
 
-def plan(occurrences, known=None, now=NOW):
-    return calendar_sync.plan(occurrences, known or {}, now, WINDOW)
+def plan(occurrences, known=None, now=NOW, ends=None):
+    """ends defaults to every known occurrence ending in the future: it only matters for the ones gone from the feed."""
+    known = known or {}
+    if ends is None:
+        ends = {key: FUTURE for key in known}
+    return calendar_sync.plan(occurrences, known, ends, now, WINDOW)
 
 
 class PlanTest(unittest.TestCase):
@@ -92,7 +97,9 @@ class PlanTest(unittest.TestCase):
         next_week = occurrence(uid="series", start=utc(2026, 10, 17, 18), end=utc(2026, 10, 17, 20),
                                slot=utc(2026, 10, 17, 18))
 
-        actions = plan([next_week], known={("series", "2026-10-10T18:00:00+00:00"): event()})
+        this_week = occurrence(uid="series", slot=utc(2026, 10, 10, 18))
+
+        actions = plan([this_week, next_week], known={("series", "2026-10-10T18:00:00+00:00"): event()})
 
         self.assertEqual([action.occurrence for action in actions], [next_week])
 
@@ -186,10 +193,70 @@ class MirrorTest(unittest.TestCase):
 
         self.assertEqual(actions, [Update(running, event(start=NOW + timedelta(minutes=1), end=NOW + timedelta(hours=1)))])
 
-    def test_finished_known_occurrence_needs_no_action(self):
+
+class CancelTest(unittest.TestCase):
+    def test_occurrence_removed_from_the_feed_is_cancelled(self):
+        self.assertEqual(plan([], known={("meeting-1", ""): event()}), [Cancel(("meeting-1", ""))])
+
+    def test_removed_occurrence_deleted_in_discord_is_cancelled(self):
+        # The announcement still gets its cancellation reply
+        self.assertEqual(plan([], known={("meeting-1", ""): None}), [Cancel(("meeting-1", ""))])
+
+    def test_cancelled_event_is_cancelled(self):
+        known = [("meeting-1", "")]
+        occurrences = parse("UID:meeting-1\nDTSTART:20261010T180000Z\nDTEND:20261010T200000Z\nSTATUS:CANCELLED", known=known)
+
+        self.assertEqual(plan(occurrences, known={known[0]: event()}), [Cancel(known[0])])
+
+    def test_cancelled_occurrence_of_a_series_is_cancelled(self):
+        slot = ("series", "2026-10-17T18:00:00+00:00")
+        occurrences = parse(WEEKLY, "UID:series\nRECURRENCE-ID:20261017T180000Z\nDTSTART:20261017T180000Z\n"
+                                    "DTEND:20261017T200000Z\nSTATUS:CANCELLED", known=[slot])
+
+        actions = plan(occurrences, known={slot: event(start=utc(2026, 10, 17, 18), end=utc(2026, 10, 17, 20))})
+
+        # The other occurrences of the series are new
+        self.assertEqual([action for action in actions if not isinstance(action, Create)], [Cancel(slot)])
+
+    def test_occurrence_moved_outside_the_window_is_not_cancelled(self):
+        later = occurrence(start=NOW + WINDOW + timedelta(days=5), end=NOW + WINDOW + timedelta(days=5, hours=2))
+
+        actions = plan([later], known={("meeting-1", ""): event()})
+
+        self.assertEqual([type(action) for action in actions], [Update])
+
+    def test_other_occurrences_are_not_cancelled(self):
+        self.assertEqual(plan([occurrence()], known={("meeting-1", ""): event(), ("meeting-2", ""): event()}),
+                         [Cancel(("meeting-2", ""))])
+
+    def test_finished_occurrence_in_the_feed_is_pruned(self):
         past = occurrence(start=NOW - timedelta(hours=3), end=NOW - timedelta(hours=1))
 
-        self.assertEqual(plan([past], known={("meeting-1", ""): None}), [])
+        self.assertEqual(plan([past], known={("meeting-1", ""): None}), [Prune(("meeting-1", ""))])
+
+    def test_occurrence_ending_now_is_pruned(self):
+        ended = occurrence(start=NOW - timedelta(hours=2), end=NOW)
+
+        self.assertEqual(plan([ended], known={("meeting-1", ""): event()}), [Prune(("meeting-1", ""))])
+
+    def test_finished_occurrence_gone_from_the_feed_is_pruned_not_cancelled(self):
+        # An occurrence of a series is no longer expanded once it is over
+        slot = ("series", "2026-09-26T18:00:00+00:00")
+
+        actions = plan([], known={slot: None}, ends={slot: utc(2026, 9, 26, 20)})
+
+        self.assertEqual(actions, [Prune(slot)])
+
+    def test_running_occurrence_gone_from_the_feed_is_cancelled(self):
+        actions = plan([], known={("meeting-1", ""): event()}, ends={("meeting-1", ""): NOW + timedelta(hours=1)})
+
+        self.assertEqual(actions, [Cancel(("meeting-1", ""))])
+
+    def test_new_occurrence_that_finished_is_not_pruned(self):
+        # Only what the bot created an event for is in the database
+        past = occurrence(start=NOW - timedelta(hours=3), end=NOW - timedelta(hours=1))
+
+        self.assertEqual(plan([past]), [])
 
 
 def details(meeting):
@@ -526,6 +593,18 @@ class RecurringTest(unittest.TestCase):
         moved = [occurrence for occurrence in occurrences if occurrence.title == "Moved meeting"]
         self.assertEqual([(occurrence.start, occurrence.key) for occurrence in moved],
                          [(utc(2026, 12, 17, 19), ("series", "2026-10-17T18:00:00+00:00"))])
+
+    def test_known_occurrence_of_a_series_beyond_the_window_is_parsed(self):
+        # Created while the window was longer, so it is still in the feed and must not count as cancelled
+        occurrences = parse(WEEKLY, known=[("series", "2026-11-28T18:00:00+00:00")])
+
+        self.assertIn((utc(2026, 11, 28, 18), ("series", "2026-11-28T18:00:00+00:00")),
+                      [(occurrence.start, occurrence.key) for occurrence in occurrences])
+
+    def test_known_occurrence_of_a_series_beyond_the_window_and_excluded_is_not_parsed(self):
+        occurrences = parse(WEEKLY + "\nEXDATE:20261128T180000Z", known=[("series", "2026-11-28T18:00:00+00:00")])
+
+        self.assertNotIn(("series", "2026-11-28T18:00:00+00:00"), [occurrence.key for occurrence in occurrences])
 
     def test_known_override_moved_beyond_the_window_and_cancelled_is_not_parsed(self):
         occurrences = parse(WEEKLY, "UID:series\nRECURRENCE-ID:20261017T180000Z\nDTSTART:20261217T190000Z\n"
