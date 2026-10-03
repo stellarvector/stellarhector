@@ -2,6 +2,7 @@ import logging
 from logging.handlers import RotatingFileHandler
 import core.bot as bot
 import core.commands as commands
+import core.db as db
 import core.events as events
 
 
@@ -43,6 +44,7 @@ if __name__ == "__main__":
     logger.info("BOT STARTING")
 
     try:
+        db.init(bot.config.get("DATABASE_PATH") or db.DEFAULT_PATH)
         bot.init()
         events.load(LOAD_EVENTS)
         events.register(LOAD_EVENTS)
