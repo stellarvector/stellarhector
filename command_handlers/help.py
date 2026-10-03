@@ -10,7 +10,7 @@ async def create_challenge(interaction: discord.Interaction):
     help_message = f"""Hi there :wave:
 These are the commands I understand:
 `/add-category` - Create a channel per challenge category: Use in the main channel of a CTF and give the categories, comma-separated (`web, crypto, pwn`).
-`/create-challenge` - Create a challenge channel: Use in the main channel of a CTF and provide the name and category of the challenge.
+`/create-challenge` - Start a challenge thread: Use in a category channel of a CTF (or a challenge thread in it) and provide the name of the challenge. When it exists already, you are added to its thread.
 `/solved` - Mark a challenge as solved: Use in any challenge channel and provide the flag as proof.
 `/help` - Show this message
 To play a CTF, click **Join** on its message in #upcoming-ctfs; the **Leave** button on the guide in its main channel takes you out again.

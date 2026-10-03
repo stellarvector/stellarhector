@@ -102,16 +102,18 @@ class StoreTest(unittest.TestCase):
         found = ctfs.get(created.id)
         self.assertEqual((found.join_channel_id, found.join_message_id), (6, 7))
 
-    def test_deleted_ctf_is_gone_with_its_players_and_categories_and_its_name_can_be_used_again(self):
+    def test_deleted_ctf_is_gone_with_its_players_categories_and_challenges_and_its_name_can_be_used_again(self):
         created = ctfs.create(new_ctf())
         ctfs.add_player(created.id, 42, utc(2026, 10, 3, 12))
         ctfs.add_category(created.id, "web", 8)
+        ctfs.add_challenge(created.id, "web", "xss", 10)
 
         ctfs.delete(created.id)
 
         self.assertIsNone(ctfs.get(created.id))
         self.assertEqual(ctfs.players(created.id), [])
         self.assertEqual(ctfs.categories(created.id), [])
+        self.assertIsNone(ctfs.challenge(created.id, "web", "xss"))
         ctfs.create(new_ctf())
 
     def test_archive_time_is_stored(self):
@@ -229,6 +231,41 @@ class CategoriesTest(unittest.TestCase):
         ctfs.add_category(self.ctf.id, "web", 9)
 
         self.assertEqual(ctfs.categories(self.ctf.id), [ctfs.Category("web", 9)])
+
+    def test_category_is_found_by_its_channel(self):
+        ctfs.add_category(self.ctf.id, "web", 8)
+        other = ctfs.create(new_ctf(name="Bar CTF"))
+        ctfs.add_category(other.id, "crypto", 9)
+
+        self.assertEqual(ctfs.category_by_channel(self.ctf.id, 8), ctfs.Category("web", 8))
+        self.assertIsNone(ctfs.category_by_channel(self.ctf.id, 9))
+
+
+class ChallengesTest(unittest.TestCase):
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        db.init(Path(tmp.name) / "test.db")
+        self.addCleanup(db.close)
+        self.ctf = ctfs.create(new_ctf())
+
+    def test_a_stored_challenge_is_found_unsolved(self):
+        ctfs.add_challenge(self.ctf.id, "web", "xss", 10)
+
+        self.assertEqual(ctfs.challenge(self.ctf.id, "web", "xss"), ctfs.Challenge("web", "xss", 10, solved=False))
+
+    def test_challenges_are_per_category_and_ctf(self):
+        other = ctfs.create(new_ctf(name="Bar CTF"))
+        ctfs.add_challenge(self.ctf.id, "web", "xss", 10)
+
+        self.assertIsNone(ctfs.challenge(self.ctf.id, "pwn", "xss"))
+        self.assertIsNone(ctfs.challenge(other.id, "web", "xss"))
+
+    def test_storing_a_challenge_again_gives_it_the_new_thread(self):
+        ctfs.add_challenge(self.ctf.id, "web", "xss", 10)
+        ctfs.add_challenge(self.ctf.id, "web", "xss", 11)
+
+        self.assertEqual(ctfs.challenge(self.ctf.id, "web", "xss").thread_id, 11)
 
 
 if __name__ == "__main__":

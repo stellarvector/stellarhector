@@ -91,10 +91,11 @@ def mark_last_call(ctf_id, channel_id, message_id, at):
 
 
 def delete(ctf_id):
-    """Forget the CTF, its player list and its categories entirely, as if it was never set up (unlike
+    """Forget the CTF, its player list, its categories and its challenges entirely, as if it was never set up (unlike
     mark_removed)."""
     with db.transaction() as conn:
         conn.execute("DELETE FROM ctf_players WHERE ctf_id = ?", (ctf_id,))
+        conn.execute("DELETE FROM ctf_challenges WHERE ctf_id = ?", (ctf_id,))
         conn.execute("DELETE FROM ctf_categories WHERE ctf_id = ?", (ctf_id,))
         conn.execute("DELETE FROM ctfs WHERE id = ?", (ctf_id,))
 
@@ -203,6 +204,41 @@ def categories(ctf_id):
         rows = conn.execute("SELECT slug, channel_id FROM ctf_categories WHERE ctf_id = ? ORDER BY slug",
                             (ctf_id,)).fetchall()
     return [Category(row["slug"], row["channel_id"]) for row in rows]
+
+
+def category_by_channel(ctf_id, channel_id):
+    """The CTF's category whose channel has this ID, or None."""
+    with db.transaction() as conn:
+        row = conn.execute("SELECT slug, channel_id FROM ctf_categories WHERE ctf_id = ? AND channel_id = ?",
+                           (ctf_id, channel_id)).fetchone()
+    return None if row is None else Category(row["slug"], row["channel_id"])
+
+
+@dataclass(frozen=True)
+class Challenge:
+    """A challenge of a CTF: the slug of its category, its own slug, the ID of its thread in the category's channel,
+    and whether it is solved."""
+    category: str
+    slug: str
+    thread_id: int
+    solved: bool
+
+
+def add_challenge(ctf_id, category, slug, thread_id):
+    """Store the CTF's challenge with this slug in the category, unsolved, with this thread; a challenge it has already
+    gets this thread instead and stays as solved as it was."""
+    with db.transaction() as conn:
+        conn.execute("INSERT INTO ctf_challenges (ctf_id, category, slug, thread_id) VALUES (?, ?, ?, ?)"
+                     " ON CONFLICT (ctf_id, category, slug) DO UPDATE SET thread_id = excluded.thread_id",
+                     (ctf_id, category, slug, thread_id))
+
+
+def challenge(ctf_id, category, slug):
+    """The CTF's challenge with this slug in the category, or None."""
+    with db.transaction() as conn:
+        row = conn.execute("SELECT * FROM ctf_challenges WHERE ctf_id = ? AND category = ? AND slug = ?",
+                           (ctf_id, category, slug)).fetchone()
+    return None if row is None else Challenge(row["category"], row["slug"], row["thread_id"], bool(row["solved"]))
 
 
 def _player(row):

@@ -13,7 +13,7 @@ from utils.ctf_places import Place
 @bot.client.tree.command(description="Use in a challenge to indicate you have solved the challenge.", guild=bot.guild)
 @app_commands.describe(flag="The correct flag for this challenge")
 async def solved(interaction, flag: str):
-    # TODO ctf-lifecycle 07: only in a challenge thread, once challenges are threads; until then challenge channels
+    # TODO ctf-lifecycle 08: only in a challenge thread, renaming the thread; until then challenge channels
     # are what the lookup calls category channels
     location = await ctf_places.locate_or_refuse(interaction, Place.CATEGORY)
     if location is None:
