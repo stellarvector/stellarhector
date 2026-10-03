@@ -6,12 +6,13 @@ into actions. sync downloads the feed and carries the actions out on Discord.
 import asyncio
 import logging
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, time, timedelta, timezone
 from zoneinfo import ZoneInfo
 
 import aiohttp
 import discord
 import icalendar
+import recurring_ical_events
 
 import core.db as db
 
@@ -27,6 +28,13 @@ LOCATION_LIMIT = 100
 EXCERPT_LIMIT = 300
 TITLE_LIMIT = 256
 
+# All-day events run from midnight to this time on their last day
+END_OF_DAY = time(23, 59)
+
+# The expansion reads dates and floating times in its own timezone, so it gets this much extra on both sides
+# of the window; plan makes the exact cut
+EXPANSION_MARGIN = timedelta(days=1)
+
 NO_LOCATION = "See description"
 NO_TITLE = "Untitled event"
 
@@ -39,7 +47,11 @@ class FeedError(Exception):
 
 @dataclass(frozen=True)
 class Occurrence:
-    """One occurrence of a calendar event, with aware start and end."""
+    """One occurrence of a calendar event, with aware start and end.
+
+    slot is the start the occurrence has in its recurring series (its RECURRENCE-ID), which differs from start
+    when the occurrence was moved; None means it is start.
+    """
     uid: str
     start: datetime
     end: datetime
@@ -47,11 +59,12 @@ class Occurrence:
     description: str = ""
     location: str = ""
     url: str = ""
+    slot: datetime | None = None
 
     @property
     def key(self):
-        """What identifies the occurrence across syncs: its UID and its start in UTC."""
-        return self.uid, self.start.astimezone(timezone.utc).isoformat()
+        """What identifies the occurrence across syncs: its UID and its slot in UTC, so moving it keeps the key."""
+        return self.uid, (self.slot or self.start).astimezone(timezone.utc).isoformat()
 
 
 @dataclass(frozen=True)
@@ -78,63 +91,89 @@ class Summary:
     cancelled: int = 0
 
 
-def parse_occurrences(ics, tz):
-    """The occurrences of the single, timed events in the ICS bytes. Times without a timezone are in tz.
+def parse_occurrences(ics, tz, now, lookahead):
+    """The occurrences in the ICS bytes that are running at now or start within lookahead from it, give or take
+    a day: plan makes the exact cut. Recurring events are expanded into their occurrences. Times without a timezone
+    are in tz, and all-day events run from 00:00 on their first day to 23:59 on their last day in tz.
 
-    Events without a UID or an end are skipped. Recurring and all-day events are not supported yet.
-    Raises FeedError when ics is not an ICS calendar.
+    Events without a UID or an end, events with properties that can't be read, and cancelled occurrences
+    are left out. Raises FeedError when ics is not an ICS calendar.
     """
     try:
         calendar = icalendar.Calendar.from_ical(ics)
     except ValueError as e:
         raise FeedError(f"Calendar feed is not a valid ICS calendar: {e}") from e
 
-    occurrences = []
-    for event in calendar.walk("VEVENT"):
-        occurrence = _parse_event(event, ZoneInfo(tz))
-        if occurrence is not None:
-            occurrences.append(occurrence)
-    return occurrences
+    # Skipped events are dropped before expanding, so the expansion only meets events it can read
+    calendar.subcomponents = [component for component in calendar.subcomponents
+                              if component.name != "VEVENT" or _is_usable(component)]
+
+    zone = ZoneInfo(tz)
+    try:
+        expanded = recurring_ical_events.of(calendar).between(now - EXPANSION_MARGIN, now + lookahead + EXPANSION_MARGIN)
+    except (recurring_ical_events.InvalidCalendar, ValueError) as e:
+        raise FeedError(f"Calendar feed could not be expanded: {e!r}") from e
+
+    # Cancelled occurrences, also single ones of a series, are left out as if they were not in the feed
+    return [_occurrence(event, zone) for event in expanded if str(event.get("STATUS", "")).upper() != "CANCELLED"]
 
 
-def _parse_event(event, zone):
+def _is_usable(event):
+    """Whether the event has what an occurrence needs; logs why when it is skipped."""
     uid = str(event.get("UID", "")).strip()
     summary = str(event.get("SUMMARY", ""))
     if not uid:
         logging.getLogger("bot").warning(f"Calendar event {summary!r} has no UID, skipped")
-        return None
+        return False
     if event.errors:
         # icalendar keeps going on values it can't read, leaving them as plain text
         logging.getLogger("bot").warning(f"Calendar event {uid} ({summary!r}) has unreadable properties {event.errors}, skipped")
-        return None
-    # Cancelled events are left out, as if they were not in the feed
-    if "RRULE" in event or "RECURRENCE-ID" in event or "DTSTART" not in event or event.get("STATUS") == "CANCELLED":
-        return None
+        return False
+    if "DTSTART" not in event:
+        logging.getLogger("bot").warning(f"Calendar event {uid} ({summary!r}) has no start, skipped")
+        return False
 
     start = event.decoded("DTSTART")
-    if not isinstance(start, datetime):
-        return None
-
-    # icalendar makes up an end when there is none, so look for one first
     if "DTEND" in event:
-        end = event.decoded("DTEND")
-        if not isinstance(end, datetime):
-            return None
-    elif "DURATION" in event:
-        end = start + event.decoded("DURATION")
-    else:
+        # A timed start with an all-day end, or the other way around, is not a period
+        if isinstance(event.decoded("DTEND"), datetime) != isinstance(start, datetime):
+            logging.getLogger("bot").warning(f"Calendar event {uid} ({summary!r}) mixes a date and a time, skipped")
+            return False
+        return True
+    # An all-day event without an end lasts one day; a timed one has no end the bot can use
+    if "DURATION" not in event and isinstance(start, datetime):
         logging.getLogger("bot").warning(f"Calendar event {uid} ({summary!r}) has no end, skipped")
-        return None
+        return False
+    return True
+
+
+def _occurrence(event, zone):
+    """The Occurrence of one expanded event, which always has DTSTART, DTEND and RECURRENCE-ID."""
+    start = event.decoded("DTSTART")
+    end = event.decoded("DTEND")
+    if isinstance(start, datetime):
+        start, end = _to_utc(start, zone), _to_utc(end, zone)
+    else:
+        # The ICS end of an all-day event is the day after its last day
+        start, end = _start_of_day(start, zone), _end_of_day(end - timedelta(days=1), zone)
+    slot = _slot(event.decoded("RECURRENCE-ID"), zone)
 
     return Occurrence(
-        uid=uid,
-        start=_to_utc(start, zone),
-        end=_to_utc(end, zone),
-        title=summary,
+        uid=str(event["UID"]).strip(),
+        start=start,
+        end=end,
+        title=str(event.get("SUMMARY", "")),
         description=str(event.get("DESCRIPTION", "")),
         location=str(event.get("LOCATION", "")),
         url=str(event.get("URL", "")),
+        slot=None if slot == start else slot,
     )
+
+
+def _slot(recurrence_id, zone):
+    if isinstance(recurrence_id, datetime):
+        return _to_utc(recurrence_id, zone)
+    return _start_of_day(recurrence_id, zone)
 
 
 def _to_utc(moment, zone):
@@ -142,6 +181,14 @@ def _to_utc(moment, zone):
     if moment.tzinfo is None:
         moment = moment.replace(tzinfo=zone)
     return moment.astimezone(timezone.utc)
+
+
+def _start_of_day(day, zone):
+    return datetime.combine(day, time(), zone)
+
+
+def _end_of_day(day, zone):
+    return datetime.combine(day, END_OF_DAY, zone)
 
 
 def plan(occurrences, known, now, lookahead):
@@ -246,8 +293,9 @@ async def sync(guild, ics_url, tz, lookahead, announce_channel=None, ping_role=N
     Raises FeedError, before anything changes, when the feed can't be downloaded or parsed. An event that
     Discord refuses is logged and tried again on the next sync.
     """
-    occurrences = parse_occurrences(await fetch(ics_url), tz)
-    actions = plan(occurrences, _known_keys(), datetime.now(timezone.utc), lookahead)
+    now = datetime.now(timezone.utc)
+    occurrences = parse_occurrences(await fetch(ics_url), tz, now, lookahead)
+    actions = plan(occurrences, _known_keys(), now, lookahead)
 
     created = 0
     for action in actions:

@@ -16,8 +16,9 @@ def utc(*args):
 
 
 def occurrence(uid="meeting-1", start=utc(2026, 10, 10, 18), end=utc(2026, 10, 10, 20), title="Weekly meeting",
-               description="", location="", url=""):
-    return Occurrence(uid=uid, start=start, end=end, title=title, description=description, location=location, url=url)
+               description="", location="", url="", slot=None):
+    return Occurrence(uid=uid, start=start, end=end, title=title, description=description, location=location, url=url,
+                      slot=slot)
 
 
 def plan(occurrences, known=(), now=NOW):
@@ -244,8 +245,15 @@ def feed(*events):
     return ("\r\n".join(lines) + "\r\n").encode()
 
 
-def parse(*events):
-    return calendar_sync.parse_occurrences(feed(*events), "Europe/Brussels")
+def parse(*events, now=NOW):
+    return calendar_sync.parse_occurrences(feed(*events), "Europe/Brussels", now, WINDOW)
+
+
+def brussels(*args):
+    return datetime(*args, tzinfo=ZoneInfo("Europe/Brussels"))
+
+
+WEEKLY = "UID:series\nDTSTART:20261010T180000Z\nDTEND:20261010T200000Z\nSUMMARY:Weekly meeting\nRRULE:FREQ=WEEKLY"
 
 
 class ParseOccurrencesTest(unittest.TestCase):
@@ -307,18 +315,6 @@ SUMMARY:Weekly meeting
         with self.assertLogs("bot", level="WARNING"):
             self.assertEqual(parse("DTSTART:20261010T180000Z\nDTEND:20261010T200000Z\nSUMMARY:Weekly meeting"), [])
 
-    def test_all_day_event_is_skipped_for_now(self):
-        self.assertEqual(parse("UID:day-1\nDTSTART;VALUE=DATE:20261010\nSUMMARY:Holiday"), [])
-
-    def test_recurring_event_and_its_overrides_are_skipped_for_now(self):
-        occurrences = parse(
-            "UID:series\nDTSTART:20261010T180000Z\nDTEND:20261010T200000Z\nRRULE:FREQ=WEEKLY",
-            "UID:series\nRECURRENCE-ID:20261017T180000Z\nDTSTART:20261017T190000Z\nDTEND:20261017T210000Z",
-            "UID:meeting-1\nDTSTART:20261010T180000Z\nDTEND:20261010T200000Z",
-        )
-
-        self.assertEqual([occurrence.uid for occurrence in occurrences], ["meeting-1"])
-
     def test_cancelled_event_is_skipped(self):
         occurrences = parse("UID:meeting-1\nDTSTART:20261010T180000Z\nDTEND:20261010T200000Z\nSTATUS:CANCELLED")
 
@@ -335,9 +331,160 @@ SUMMARY:Weekly meeting
         self.assertEqual([occurrence.uid for occurrence in occurrences], ["meeting-1"])
         self.assertEqual(len(logs.output), 2)
 
+    def test_finished_and_far_away_events_are_left_out(self):
+        occurrences = parse(
+            "UID:past\nDTSTART:20260901T180000Z\nDTEND:20260901T200000Z",
+            "UID:far\nDTSTART:20270101T180000Z\nDTEND:20270101T200000Z",
+            "UID:meeting-1\nDTSTART:20261010T180000Z\nDTEND:20261010T200000Z",
+        )
+
+        self.assertEqual([occurrence.uid for occurrence in occurrences], ["meeting-1"])
+
+    def test_running_event_is_parsed(self):
+        occurrences = parse("UID:running\nDTSTART:20261002T180000Z\nDTEND:20261004T200000Z")
+
+        self.assertEqual((occurrences[0].start, occurrences[0].end), (utc(2026, 10, 2, 18), utc(2026, 10, 4, 20)))
+
     def test_feed_that_is_not_ics_raises(self):
         with self.assertRaises(calendar_sync.FeedError):
-            calendar_sync.parse_occurrences(b"<html>Not found</html>", "Europe/Brussels")
+            calendar_sync.parse_occurrences(b"<html>Not found</html>", "Europe/Brussels", NOW, WINDOW)
+
+
+class RecurringTest(unittest.TestCase):
+    def test_weekly_event_has_one_occurrence_per_week_in_the_window(self):
+        occurrences = parse(WEEKLY)
+
+        self.assertEqual([occurrence.start for occurrence in occurrences],
+                         [utc(2026, 10, 10, 18), utc(2026, 10, 17, 18), utc(2026, 10, 24, 18), utc(2026, 10, 31, 18)])
+        self.assertTrue(all(occurrence.end - occurrence.start == timedelta(hours=2) for occurrence in occurrences))
+        self.assertTrue(all(occurrence.title == "Weekly meeting" for occurrence in occurrences))
+        self.assertEqual(len({occurrence.key for occurrence in occurrences}), 4)
+
+    def test_window_rolling_forward_creates_only_the_next_occurrence(self):
+        first_sync = plan(parse(WEEKLY))
+        known = {action.occurrence.key for action in first_sync}
+        week_later = NOW + timedelta(days=7)
+
+        actions = plan(parse(WEEKLY, now=week_later), known=known, now=week_later)
+
+        self.assertEqual([action.occurrence.start for action in actions], [utc(2026, 11, 7, 18)])
+
+    def test_floating_times_of_a_series_are_in_the_timezone(self):
+        # 20:00 in Brussels is 18:00 UTC in summer time and 19:00 UTC in winter time (from 25 October)
+        occurrences = parse("UID:series\nDTSTART:20261017T200000\nDTEND:20261017T220000\nRRULE:FREQ=WEEKLY;COUNT=2")
+
+        self.assertEqual([occurrence.start for occurrence in occurrences], [utc(2026, 10, 17, 18), utc(2026, 10, 24, 18)])
+
+    def test_series_in_a_timezone_keeps_local_time_over_daylight_saving(self):
+        occurrences = parse("UID:series\nDTSTART;TZID=Europe/Brussels:20261017T200000\n"
+                            "DTEND;TZID=Europe/Brussels:20261017T220000\nRRULE:FREQ=WEEKLY;COUNT=3")
+
+        self.assertEqual([occurrence.start for occurrence in occurrences],
+                         [utc(2026, 10, 17, 18), utc(2026, 10, 24, 18), utc(2026, 10, 31, 19)])
+
+    def test_excluded_date_is_left_out(self):
+        occurrences = parse(WEEKLY + "\nEXDATE:20261017T180000Z")
+
+        self.assertNotIn(utc(2026, 10, 17, 18), [occurrence.start for occurrence in occurrences])
+        self.assertEqual(len(occurrences), 3)
+
+    def test_override_uses_its_own_details(self):
+        occurrences = parse(WEEKLY, "UID:series\nRECURRENCE-ID:20261017T180000Z\nDTSTART:20261017T190000Z\n"
+                                    "DTEND:20261017T213000Z\nSUMMARY:Special meeting\nLOCATION:Room 2")
+
+        moved = [occurrence for occurrence in occurrences if occurrence.title == "Special meeting"]
+        self.assertEqual(len(occurrences), 4)
+        self.assertEqual(len(moved), 1)
+        self.assertEqual((moved[0].start, moved[0].end, moved[0].location),
+                         (utc(2026, 10, 17, 19), utc(2026, 10, 17, 21, 30), "Room 2"))
+
+    def test_moved_override_keeps_the_key_of_its_slot_in_the_series(self):
+        # So a later change to the override is the same occurrence, not a new one
+        occurrences = parse(WEEKLY, "UID:series\nRECURRENCE-ID:20261017T180000Z\nDTSTART:20261017T190000Z\n"
+                                    "DTEND:20261017T210000Z")
+
+        moved = [occurrence for occurrence in occurrences if occurrence.start == utc(2026, 10, 17, 19)]
+        self.assertEqual(moved[0].key, ("series", "2026-10-17T18:00:00+00:00"))
+
+    def test_cancelled_override_is_left_out(self):
+        occurrences = parse(WEEKLY, "UID:series\nRECURRENCE-ID:20261017T180000Z\nDTSTART:20261017T180000Z\n"
+                                    "DTEND:20261017T200000Z\nSTATUS:CANCELLED")
+
+        self.assertEqual([occurrence.start for occurrence in occurrences],
+                         [utc(2026, 10, 10, 18), utc(2026, 10, 24, 18), utc(2026, 10, 31, 18)])
+
+    def test_cancelled_status_in_lower_case_is_left_out(self):
+        self.assertEqual(parse("UID:meeting-1\nDTSTART:20261010T180000Z\nDTEND:20261010T200000Z\nSTATUS:cancelled"), [])
+
+    def test_date_start_with_a_timed_end_is_skipped(self):
+        with self.assertLogs("bot", level="WARNING"):
+            self.assertEqual(parse("UID:mixed\nDTSTART;VALUE=DATE:20261010\nDTEND:20261010T200000Z"), [])
+
+    def test_series_without_end_is_skipped(self):
+        with self.assertLogs("bot", level="WARNING"):
+            self.assertEqual(parse("UID:series\nDTSTART:20261010T180000Z\nRRULE:FREQ=WEEKLY"), [])
+
+    def test_series_with_a_broken_rule_is_skipped_and_others_still_parse(self):
+        with self.assertLogs("bot", level="WARNING"):
+            occurrences = parse(
+                "UID:broken\nDTSTART:20261010T180000Z\nDTEND:20261010T200000Z\nRRULE:FREQ=SOMETIMES",
+                "UID:meeting-1\nDTSTART:20261010T180000Z\nDTEND:20261010T200000Z",
+            )
+
+        self.assertEqual([occurrence.uid for occurrence in occurrences], ["meeting-1"])
+
+    def test_occurrence_known_by_its_slot_is_not_created_again(self):
+        moved = occurrence(uid="series", start=utc(2026, 10, 17, 19), end=utc(2026, 10, 17, 21), slot=utc(2026, 10, 17, 18))
+
+        self.assertEqual(plan([moved], known=[("series", "2026-10-17T18:00:00+00:00")]), [])
+
+
+class AllDayTest(unittest.TestCase):
+    def test_all_day_event_runs_from_midnight_to_23_59_in_the_timezone(self):
+        occurrences = parse("UID:day\nDTSTART;VALUE=DATE:20261010\nDTEND;VALUE=DATE:20261011\nSUMMARY:Holiday")
+
+        self.assertEqual((occurrences[0].start, occurrences[0].end), (brussels(2026, 10, 10), brussels(2026, 10, 10, 23, 59)))
+        self.assertEqual(occurrences[0].title, "Holiday")
+
+    def test_all_day_event_without_end_lasts_one_day(self):
+        occurrences = parse("UID:day\nDTSTART;VALUE=DATE:20261010")
+
+        self.assertEqual((occurrences[0].start, occurrences[0].end), (brussels(2026, 10, 10), brussels(2026, 10, 10, 23, 59)))
+
+    def test_multi_day_event_runs_from_the_first_day_to_23_59_on_the_last_day(self):
+        # The ICS end date is the day after the last day; 25 October is the switch to winter time
+        occurrences = parse("UID:days\nDTSTART;VALUE=DATE:20261024\nDTEND;VALUE=DATE:20261027")
+
+        self.assertEqual((occurrences[0].start, occurrences[0].end), (utc(2026, 10, 23, 22), utc(2026, 10, 26, 22, 59)))
+
+    def test_multi_day_event_with_a_duration(self):
+        occurrences = parse("UID:days\nDTSTART;VALUE=DATE:20261010\nDURATION:P2D")
+
+        self.assertEqual(occurrences[0].end, brussels(2026, 10, 11, 23, 59))
+
+    def test_running_multi_day_event_is_parsed(self):
+        occurrences = parse("UID:days\nDTSTART;VALUE=DATE:20260928\nDTEND;VALUE=DATE:20261006")
+
+        self.assertEqual((occurrences[0].start, occurrences[0].end), (brussels(2026, 9, 28), brussels(2026, 10, 5, 23, 59)))
+
+    def test_recurring_all_day_event(self):
+        occurrences = parse("UID:days\nDTSTART;VALUE=DATE:20261010\nRRULE:FREQ=WEEKLY;COUNT=2")
+
+        self.assertEqual([(occurrence.start, occurrence.end) for occurrence in occurrences],
+                         [(brussels(2026, 10, 10), brussels(2026, 10, 10, 23, 59)),
+                          (brussels(2026, 10, 17), brussels(2026, 10, 17, 23, 59))])
+
+    def test_all_day_event_in_another_timezone(self):
+        occurrences = calendar_sync.parse_occurrences(feed("UID:day\nDTSTART;VALUE=DATE:20261010"), "America/New_York", NOW, WINDOW)
+
+        self.assertEqual(occurrences[0].start, datetime(2026, 10, 10, tzinfo=ZoneInfo("America/New_York")))
+
+    def test_running_all_day_event_is_created_starting_in_a_minute(self):
+        actions = plan(parse("UID:today\nDTSTART;VALUE=DATE:20261003"))
+
+        self.assertEqual(len(actions), 1)
+        self.assertEqual((actions[0].details.start, actions[0].details.end), (NOW + timedelta(minutes=1), brussels(2026, 10, 3, 23, 59)))
+        self.assertEqual(actions[0].occurrence.start, brussels(2026, 10, 3))
 
 
 if __name__ == "__main__":

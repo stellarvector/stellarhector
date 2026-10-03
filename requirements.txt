@@ -8,3 +8,4 @@ nh3
 emoji
 gitpython
 icalendar
+recurring-ical-events
