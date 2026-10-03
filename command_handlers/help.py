@@ -11,7 +11,7 @@ async def create_challenge(interaction: discord.Interaction):
 These are the commands I understand:
 `/add-category` - Create a channel per challenge category: Use in the main channel of a CTF and give the categories, comma-separated (`web, crypto, pwn`).
 `/create-challenge` - Start a challenge thread: Use in a category channel of a CTF (or a challenge thread in it) and provide the name of the challenge. When it exists already, you are added to its thread.
-`/solved` - Mark a challenge as solved: Use in any challenge channel and provide the flag as proof.
+`/solved` - Mark a challenge as solved: Use in its challenge thread and provide the flag as proof. The thread stays open.
 `/help` - Show this message
 To play a CTF, click **Join** on its message in #upcoming-ctfs; the **Leave** button on the guide in its main channel takes you out again.
 
@@ -19,6 +19,8 @@ For admins, managers and moderators, in the #bot channel of a CTF:
 `/add-player` - Give a member access to the CTF and put them on its player list.
 `/remove-player` - Take a member's access to the CTF away and take them off its player list.
 `/last-call` - Post the CTF's join message again at the bottom of #upcoming-ctfs, as a last call.
+In a challenge thread:
+`/unsolve` - Mark a challenge that was marked solved by mistake as unsolved again.
 
 For admins and managers:
 `/setup-ctf` - Set up a new CTF: its role, category, main channel and #bot channel. Give the CTFtime event ID to also store its dates.

@@ -116,6 +116,14 @@ class StoreTest(unittest.TestCase):
         self.assertIsNone(ctfs.challenge(created.id, "web", "xss"))
         ctfs.create(new_ctf())
 
+    def test_has_no_overview_message_until_it_is_stored(self):
+        created = ctfs.create(new_ctf())
+        self.assertIsNone(created.overview_message_id)
+
+        ctfs.set_overview_message(created.id, 77)
+
+        self.assertEqual(ctfs.get(created.id).overview_message_id, 77)
+
     def test_archive_time_is_stored(self):
         created = ctfs.create(new_ctf())
         ctfs.mark_archived(created.id, utc(2026, 10, 20, 9))
@@ -266,6 +274,47 @@ class ChallengesTest(unittest.TestCase):
         ctfs.add_challenge(self.ctf.id, "web", "xss", 11)
 
         self.assertEqual(ctfs.challenge(self.ctf.id, "web", "xss").thread_id, 11)
+
+    def test_challenges_are_listed_by_category_then_slug(self):
+        other = ctfs.create(new_ctf(name="Bar CTF"))
+        ctfs.add_challenge(self.ctf.id, "web", "xss", 10)
+        ctfs.add_challenge(self.ctf.id, "crypto", "rsa", 11)
+        ctfs.add_challenge(self.ctf.id, "web", "sqli", 12)
+        ctfs.add_challenge(other.id, "web", "csrf", 13)
+
+        self.assertEqual(ctfs.challenges(self.ctf.id), [ctfs.Challenge("crypto", "rsa", 11, solved=False),
+                                                        ctfs.Challenge("web", "sqli", 12, solved=False),
+                                                        ctfs.Challenge("web", "xss", 10, solved=False)])
+
+    def test_challenge_is_found_by_its_thread(self):
+        ctfs.add_challenge(self.ctf.id, "web", "xss", 10)
+        other = ctfs.create(new_ctf(name="Bar CTF"))
+        ctfs.add_challenge(other.id, "web", "csrf", 11)
+
+        self.assertEqual(ctfs.challenge_by_thread(self.ctf.id, 10), ctfs.Challenge("web", "xss", 10, solved=False))
+        self.assertIsNone(ctfs.challenge_by_thread(self.ctf.id, 11))
+
+    def test_marking_solved_changes_it_once(self):
+        ctfs.add_challenge(self.ctf.id, "web", "xss", 10)
+
+        self.assertTrue(ctfs.set_solved(self.ctf.id, "web", "xss", True))
+        self.assertFalse(ctfs.set_solved(self.ctf.id, "web", "xss", True))
+        self.assertTrue(ctfs.challenge(self.ctf.id, "web", "xss").solved)
+
+    def test_marking_unsolved_changes_it_once(self):
+        ctfs.add_challenge(self.ctf.id, "web", "xss", 10)
+        ctfs.set_solved(self.ctf.id, "web", "xss", True)
+
+        self.assertTrue(ctfs.set_solved(self.ctf.id, "web", "xss", False))
+        self.assertFalse(ctfs.set_solved(self.ctf.id, "web", "xss", False))
+        self.assertFalse(ctfs.challenge(self.ctf.id, "web", "xss").solved)
+
+    def test_storing_a_challenge_again_keeps_it_solved(self):
+        ctfs.add_challenge(self.ctf.id, "web", "xss", 10)
+        ctfs.set_solved(self.ctf.id, "web", "xss", True)
+        ctfs.add_challenge(self.ctf.id, "web", "xss", 11)
+
+        self.assertTrue(ctfs.challenge(self.ctf.id, "web", "xss").solved)
 
 
 if __name__ == "__main__":

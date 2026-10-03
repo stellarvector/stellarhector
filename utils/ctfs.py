@@ -20,11 +20,13 @@ class NewCtf:
 
 @dataclass(frozen=True)
 class Ctf(NewCtf):
-    """A stored CTF: what it was created with, where its join message is (None when it was not posted), and when each
-    lifecycle step was done (None until it is)."""
+    """A stored CTF: what it was created with, where its join message is (None when it was not posted), its challenge
+    overview in the main channel (None until its first challenge), and when each lifecycle step was done (None until it
+    is)."""
     id: int
     join_channel_id: int | None
     join_message_id: int | None
+    overview_message_id: int | None
     last_call_at: datetime | None
     released_at: datetime | None
     locked_at: datetime | None
@@ -88,6 +90,12 @@ def mark_last_call(ctf_id, channel_id, message_id, at):
     with db.transaction() as conn:
         conn.execute("UPDATE ctfs SET join_channel_id = ?, join_message_id = ?, last_call_at = ? WHERE id = ?",
                      (channel_id, message_id, db.time_text(at), ctf_id))
+
+
+def set_overview_message(ctf_id, message_id):
+    """Remember the CTF's challenge overview message in its main channel."""
+    with db.transaction() as conn:
+        conn.execute("UPDATE ctfs SET overview_message_id = ? WHERE id = ?", (message_id, ctf_id))
 
 
 def delete(ctf_id):
@@ -238,7 +246,36 @@ def challenge(ctf_id, category, slug):
     with db.transaction() as conn:
         row = conn.execute("SELECT * FROM ctf_challenges WHERE ctf_id = ? AND category = ? AND slug = ?",
                            (ctf_id, category, slug)).fetchone()
-    return None if row is None else Challenge(row["category"], row["slug"], row["thread_id"], bool(row["solved"]))
+    return None if row is None else _challenge(row)
+
+
+def challenge_by_thread(ctf_id, thread_id):
+    """The CTF's challenge whose thread has this ID, or None."""
+    with db.transaction() as conn:
+        row = conn.execute("SELECT * FROM ctf_challenges WHERE ctf_id = ? AND thread_id = ?",
+                           (ctf_id, thread_id)).fetchone()
+    return None if row is None else _challenge(row)
+
+
+def challenges(ctf_id):
+    """The CTF's challenges, by category, then slug."""
+    with db.transaction() as conn:
+        rows = conn.execute("SELECT * FROM ctf_challenges WHERE ctf_id = ? ORDER BY category, slug",
+                            (ctf_id,)).fetchall()
+    return [_challenge(row) for row in rows]
+
+
+def set_solved(ctf_id, category, slug, solved):
+    """Mark the CTF's challenge with this slug in the category solved or not. Returns whether that changed it, so of two
+    runs at the same time only one does."""
+    with db.transaction() as conn:
+        cursor = conn.execute("UPDATE ctf_challenges SET solved = ? WHERE ctf_id = ? AND category = ? AND slug = ?"
+                              " AND solved != ?", (int(solved), ctf_id, category, slug, int(solved)))
+        return cursor.rowcount == 1
+
+
+def _challenge(row):
+    return Challenge(row["category"], row["slug"], row["thread_id"], bool(row["solved"]))
 
 
 def _player(row):

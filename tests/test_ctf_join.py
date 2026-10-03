@@ -16,8 +16,9 @@ def utc(*args):
 
 
 CTF = ctfs.Ctf(name="Foo CTF", ctftime_id=None, start=None, finish=None, role_id=1, category_id=2, main_channel_id=3,
-               bot_channel_id=4, guide_message_id=5, id=9, join_channel_id=6, join_message_id=7, last_call_at=None,
-               released_at=None, locked_at=None, archived_at=None, removal_reminded_at=None, removed_at=None)
+               bot_channel_id=4, guide_message_id=5, id=9, join_channel_id=6, join_message_id=7,
+               overview_message_id=None, last_call_at=None, released_at=None, locked_at=None, archived_at=None,
+               removal_reminded_at=None, removed_at=None)
 # 2026-10-10 08:00 and 2026-10-12 08:00 UTC
 START, FINISH = utc(2026, 10, 10, 8), utc(2026, 10, 12, 8)
 

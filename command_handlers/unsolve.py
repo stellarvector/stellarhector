@@ -1,39 +1,31 @@
-# Sets the name back to the original and sorts the challenges
-# Can be run in a solved challenge by an admin or manager.
+# Marks a solved challenge unsolved again: its thread is renamed back to `<slug>` and the overview is updated
+# Can be run in a challenge thread by administrators, managers and moderators
 import core.bot as bot
-import discord
 from discord import app_commands
-from utils.ctf import get_new_channel_position
 from error_handlers.permissions import check_role_error
 from error_handlers.default import default as default_error_handler
-from utils import ctf_places
-from utils.ctf_places import Place
+from utils import ctf_challenges, ctf_places
 
 
 @bot.client.tree.command(description="Use in a challenge to revert the solving of the challenge.", guild=bot.guild)
-@app_commands.checks.has_any_role(*bot.MANAGER_ROLES)
+@app_commands.checks.has_any_role(*bot.STAFF_ROLES)
 async def unsolve(interaction):
-    # TODO ctf-lifecycle 08: only in a challenge thread, renaming the thread; until then challenge channels
-    # are what the lookup calls category channels
-    location = await ctf_places.locate_or_refuse(interaction, Place.CATEGORY)
-    if location is None:
+    location = ctf_places.locate(interaction.channel)
+    challenge = ctf_challenges.challenge_at(location, interaction.channel)
+    if challenge is None:
+        await interaction.response.send_message(f":no_entry: {ctf_challenges.NOT_IN_CHALLENGE}", ephemeral=True)
         return
 
     await interaction.response.defer(thinking=True)
-    message_id = interaction.channel.last_message_id
 
-    if "solved" not in interaction.channel.name:
+    if not await ctf_challenges.mark_solved(interaction.guild, location.ctf, interaction.channel, challenge, False):
         await interaction.edit_original_response(content="This challenge is not solved.\nIn order to mark a challenge as unsolved it should have been marked as solved.")
         return
 
-    new_name = interaction.channel.name.replace("solved_", "")
-    new_position = get_new_channel_position(interaction.channel.category, new_name)
-
-    await interaction.channel.edit(name=new_name, position=new_position)
     await interaction.edit_original_response(content=f"Turns out this wasn't a solve after all :pensive:")
 
 @unsolve.error
-async def error_on_create_challenge_command(interaction, error):
+async def error_on_unsolve_command(interaction, error):
     if await check_role_error(interaction, error):
         return
 

@@ -4,7 +4,7 @@ from dataclasses import dataclass
 
 import discord
 
-from utils import ctfs
+from utils import ctf_overview, ctfs
 from utils.ctf_places import Place
 
 # Two runs at the same time could both find a challenge missing and make two threads for it
@@ -15,6 +15,7 @@ _AUTO_ARCHIVE = 10080
 
 NOT_IN_CATEGORY = ("Run this in a category channel of the CTF, or in a challenge thread. "
                    "Create a category channel with `/add-category` in the main channel if needed.")
+NOT_IN_CHALLENGE = "Run this in a challenge thread of the CTF, started with `/create-challenge`."
 
 
 @dataclass(frozen=True)
@@ -23,6 +24,14 @@ class Started:
     thread: discord.Thread
     slug: str
     created: bool
+
+
+def challenge_at(location, channel):
+    """The stored Challenge whose thread is the channel at the Location, or None, also for a thread in a category
+    channel not made with /create-challenge."""
+    if location.place is not Place.CHALLENGE:
+        return None
+    return ctfs.challenge_by_thread(location.ctf.id, channel.id)
 
 
 def category_of(location):
@@ -36,8 +45,8 @@ def category_of(location):
 async def start(guild, ctf, category, channel, user, slug):
     """Add the user to the thread of the challenge with this slug in the category, whose channel is given. When the
     challenge has no thread yet, or it was deleted by hand, a starter message is posted in the channel and a public
-    thread made on it (named `✅ <slug>` when the challenge is solved), and stored. An archived thread is unarchived
-    first. Returns what was Started."""
+    thread made on it (named `✅ <slug>` when the challenge is solved), stored, and put in the CTF's overview. An
+    archived thread is unarchived first. Returns what was Started."""
     async with _lock:
         stored = ctfs.challenge(ctf.id, category.slug, slug)
         thread = None if stored is None else await _thread(guild, stored.thread_id)
@@ -49,8 +58,29 @@ async def start(guild, ctf, category, channel, user, slug):
     if thread.archived:
         await thread.edit(archived=False)
     await thread.add_user(user)
-    # TODO ctf-lifecycle 08: update the challenge overview
+    if created:
+        await ctf_overview.update(guild, ctf.id)
     return Started(thread, slug, created)
+
+
+async def mark_solved(guild, ctf, thread, challenge, solved):
+    """Mark the CTF's Challenge, whose thread is given, solved or not: the thread is renamed to `✅ <slug>` or back to
+    `<slug>` (unarchived if needed, never archived) and the overview updated. Returns False when it already was, and
+    then changes nothing. When the thread can't be renamed, the challenge is stored as it was and the error raised."""
+    if not ctfs.set_solved(ctf.id, challenge.category, challenge.slug, solved):
+        return False
+    try:
+        await thread.edit(name=thread_name(challenge.slug, solved), archived=False)
+    except discord.DiscordException:
+        ctfs.set_solved(ctf.id, challenge.category, challenge.slug, not solved)
+        raise
+
+    await ctf_overview.update(guild, ctf.id)
+    return True
+
+
+def thread_name(slug, solved):
+    return f"✅ {slug}" if solved else slug
 
 
 async def _create_thread(channel, user, slug, solved):
@@ -59,7 +89,7 @@ async def _create_thread(channel, user, slug, solved):
     message = await channel.send(f"🧩 `{slug}`, started by {user.mention}",
                                  allowed_mentions=discord.AllowedMentions.none())
     try:
-        return await message.create_thread(name=f"✅ {slug}" if solved else slug, auto_archive_duration=_AUTO_ARCHIVE)
+        return await message.create_thread(name=thread_name(slug, solved), auto_archive_duration=_AUTO_ARCHIVE)
     except discord.DiscordException:
         await message.delete()
         raise

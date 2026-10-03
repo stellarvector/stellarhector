@@ -6,6 +6,7 @@ from pathlib import Path
 import discord
 
 from core import db
+from tests import test_ctf_overview
 from tests.test_ctfs import new_ctf
 from utils import ctf_challenges, ctfs
 from utils.ctf_places import locate
@@ -31,8 +32,13 @@ class FakeThread:
         if user not in self.members:
             self.members.append(user)
 
-    async def edit(self, archived):
-        self.archived = archived
+    async def edit(self, name=None, archived=None):
+        if self.guild.fail_edits:
+            raise discord.DiscordException()
+        if self.archived and archived is not False:
+            raise discord.DiscordException("editing an archived thread")
+        self.name = self.name if name is None else name
+        self.archived = self.archived if archived is None else archived
 
 
 class FakeMessage:
@@ -62,9 +68,12 @@ class FakeChannel:
 
 class FakeGuild:
     """threads are those on Discord; cached are those the bot has in its cache, which leaves out archived ones."""
-    def __init__(self):
-        self.threads, self.cached = [], []
-        self.fail_threads = False
+    def __init__(self, main=None):
+        self.threads, self.cached, self.main = [], [], main
+        self.fail_threads = self.fail_edits = False
+
+    def get_channel(self, channel_id):
+        return self.main if self.main is not None and self.main.id == channel_id else None
 
     def add(self, thread):
         self.threads.append(thread)
@@ -85,14 +94,15 @@ class FakeResponse:
     status, reason = 404, "Not Found"
 
 
-class StartTest(unittest.IsolatedAsyncioTestCase):
+class ChallengeTestCase(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         tmp = tempfile.TemporaryDirectory()
         self.addCleanup(tmp.cleanup)
         db.init(Path(tmp.name) / "test.db")
         self.addCleanup(db.close)
 
-        self.guild = FakeGuild()
+        self.main = test_ctf_overview.FakeChannel(3)
+        self.guild = FakeGuild(self.main)
         self.ctf = ctfs.create(new_ctf(category_id=2, main_channel_id=3, bot_channel_id=4))
         self.web = FakeChannel(self.guild, category_id=2)
         ctfs.add_category(self.ctf.id, "web", self.web.id)
@@ -101,6 +111,9 @@ class StartTest(unittest.IsolatedAsyncioTestCase):
     async def start(self, user, slug, channel=None):
         channel = channel or self.web
         return await ctf_challenges.start(self.guild, self.ctf, ctfs.Category("web", channel.id), channel, user, slug)
+
+
+class StartTest(ChallengeTestCase):
 
     async def test_a_new_challenge_gets_a_public_thread_on_a_starter_message_with_the_user_in_it(self):
         started = await self.start(self.alice, "xss")
@@ -112,6 +125,14 @@ class StartTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(started.thread.auto_archive_duration, 10080)
         self.assertEqual(started.thread.members, [self.alice])
         self.assertTrue(started.created)
+
+    async def test_a_new_challenge_is_put_in_the_overview(self):
+        first = await self.start(self.alice, "xss")
+        second = await self.start(self.alice, "sqli")
+
+        [overview] = self.main.messages
+        self.assertEqual(overview.content, f"**Challenges**\n\n<#{self.web.id}>\n{second.thread.mention}\n"
+                                           f"{first.thread.mention}")
 
     async def test_the_starter_message_pings_nobody(self):
         await self.start(self.alice, "xss")
@@ -197,6 +218,93 @@ class StartTest(unittest.IsolatedAsyncioTestCase):
 
         self.assertIsNot(started.thread, first.thread)
         self.assertTrue(started.created)
+
+
+class MarkSolvedTest(ChallengeTestCase):
+    async def asyncSetUp(self):
+        self.thread = (await self.start(self.alice, "xss")).thread
+
+    async def mark(self, solved):
+        challenge = ctfs.challenge(self.ctf.id, "web", "xss")
+        return await ctf_challenges.mark_solved(self.guild, self.ctf, self.thread, challenge, solved)
+
+    async def test_solving_renames_the_thread_keeps_it_open_and_stores_it(self):
+        self.assertTrue(await self.mark(True))
+
+        self.assertEqual(self.thread.name, "✅ xss")
+        self.assertFalse(self.thread.archived)
+        self.assertTrue(ctfs.challenge(self.ctf.id, "web", "xss").solved)
+
+    async def test_solving_a_solved_challenge_changes_nothing(self):
+        await self.mark(True)
+        self.thread.name = "renamed by hand"
+
+        self.assertFalse(await self.mark(True))
+
+        self.assertEqual(self.thread.name, "renamed by hand")
+
+    async def test_unsolving_renames_the_thread_back_and_stores_it(self):
+        await self.mark(True)
+
+        self.assertTrue(await self.mark(False))
+
+        self.assertEqual(self.thread.name, "xss")
+        self.assertFalse(ctfs.challenge(self.ctf.id, "web", "xss").solved)
+
+    async def test_unsolving_an_unsolved_challenge_changes_nothing(self):
+        self.assertFalse(await self.mark(False))
+
+        self.assertEqual(self.thread.name, "xss")
+
+    async def test_an_archived_thread_is_unarchived_to_rename_it(self):
+        self.thread.archived = True
+
+        await self.mark(True)
+
+        self.assertEqual(self.thread.name, "✅ xss")
+        self.assertFalse(self.thread.archived)
+
+    async def test_the_challenge_stays_as_it_was_when_the_thread_cannot_be_renamed(self):
+        self.guild.fail_edits = True
+
+        with self.assertRaises(discord.DiscordException):
+            await self.mark(True)
+
+        self.assertFalse(ctfs.challenge(self.ctf.id, "web", "xss").solved)
+
+    async def test_an_overview_deleted_by_hand_is_posted_again(self):
+        self.main.messages.clear()
+
+        await self.mark(True)
+
+        [overview] = self.main.messages
+        self.assertIn(self.thread.mention, overview.content)
+
+
+class ChallengeAtTest(unittest.TestCase):
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        db.init(Path(tmp.name) / "test.db")
+        self.addCleanup(db.close)
+        self.ctf = ctfs.create(new_ctf(category_id=2, main_channel_id=3, bot_channel_id=4))
+        self.web = FakeChannel(None, category_id=2)
+        ctfs.add_category(self.ctf.id, "web", self.web.id)
+
+    def test_a_stored_challenge_thread_is_its_challenge(self):
+        thread = FakeThread(None, self.web, "xss", 10080)
+        ctfs.add_challenge(self.ctf.id, "web", "xss", thread.id)
+
+        self.assertEqual(ctf_challenges.challenge_at(locate(thread), thread),
+                         ctfs.Challenge("web", "xss", thread.id, solved=False))
+
+    def test_a_thread_not_made_by_create_challenge_is_no_challenge(self):
+        thread = FakeThread(None, self.web, "chat", 10080)
+
+        self.assertIsNone(ctf_challenges.challenge_at(locate(thread), thread))
+
+    def test_a_category_channel_is_no_challenge(self):
+        self.assertIsNone(ctf_challenges.challenge_at(locate(self.web), self.web))
 
 
 class CategoryOfTest(unittest.TestCase):
