@@ -100,7 +100,7 @@ class LockTest(unittest.IsolatedAsyncioTestCase):
         self.bot_user = object()
         everyone, member, ctf_role = (
             self.guild.default_role,
-            self.guild.role("sv{member}"),
+            self.guild.role("sv{follower}"),
             self.guild.role("Foo CTF"),
         )
         admin, manager, moderator = (self.guild.role(name) for name in ("sv{admin}", "sv{manager}", "sv{moderator}"))
@@ -166,10 +166,11 @@ class LockTest(unittest.IsolatedAsyncioTestCase):
         await self.lock()
 
         overwrites = self.category.overwrites
-        for name in ("@everyone", "sv{member}", "Foo CTF"):
+        for name in ("@everyone", "sv{player}", "sv{follower}", "Foo CTF"):
             with self.subTest(name):
                 self.assert_cannot_write(overwrites[self.guild.role(name)])
-        self.assertIs(overwrites[self.guild.role("sv{member}")].view_channel, True)
+        self.assertIs(overwrites[self.guild.role("sv{player}")].view_channel, True)
+        self.assertIs(overwrites[self.guild.role("sv{follower}")].view_channel, True)
         self.assertIs(overwrites[self.guild.role("Foo CTF")].view_channel, True)
         self.assertIs(overwrites[self.guild.default_role].view_channel, False)
 
@@ -262,7 +263,7 @@ class LockTest(unittest.IsolatedAsyncioTestCase):
         self.assertIs(result.archive_error, error)
         self.assertEqual(result.ctf.locked_at, NOW)
         self.assertEqual((thread.archived, thread.locked), (True, True))
-        self.assert_cannot_write(self.category.overwrites[self.guild.role("sv{member}")])
+        self.assert_cannot_write(self.category.overwrites[self.guild.role("sv{follower}")])
 
     async def test_a_second_run_changes_nothing_and_says_so(self):
         await self.lock()
@@ -284,11 +285,11 @@ class LockTest(unittest.IsolatedAsyncioTestCase):
         with self.assertRaisesRegex(lock.LockRefused, "was not archived.*`/archive-ctf`"):
             await self.lock()
 
-    async def test_refused_without_the_member_role(self):
+    async def test_refused_without_any_member_role(self):
         for member in (None, "sv{nonexistent}"):
             with self.subTest(member):
-                with self.assertRaisesRegex(lock.LockRefused, "member role"):
-                    await self.lock(roles=replace(ROLES, member=member))
+                with self.assertRaisesRegex(lock.LockRefused, "player nor the follower role"):
+                    await self.lock(roles=replace(ROLES, player=member, follower=member))
 
                 self.assertEqual(self.category.edits, 0)
                 self.assertIsNone(store.get(self.ctf.id).locked_at)
@@ -315,7 +316,7 @@ class LockTest(unittest.IsolatedAsyncioTestCase):
 
         await self.lock()
 
-        member = stale.on_discord[self.guild.role("sv{member}")]
+        member = stale.on_discord[self.guild.role("sv{follower}")]
         self.assertIs(member.view_channel, True)
         self.assert_cannot_write(member)
 
@@ -326,7 +327,7 @@ class LockTest(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(result.ctf.locked_at, NOW)
         self.assertNotIn(None, self.category.overwrites)
-        self.assert_cannot_write(self.category.overwrites[self.guild.role("sv{member}")])
+        self.assert_cannot_write(self.category.overwrites[self.guild.role("sv{follower}")])
 
     async def test_a_channel_without_threads_in_the_category_is_synced_too(self):
         voice = FakeCategoryChannel("voice", self.category, {})

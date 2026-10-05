@@ -106,7 +106,7 @@ class CtfLifecycle(commands.Cog):
 
         await interaction.response.defer(thinking=True)
         try:
-            await release_ctf(guild(interaction), ctf, self.settings.roles.member, datetime.now(UTC))
+            await release_ctf(guild(interaction), ctf, self.settings.roles, datetime.now(UTC))
         except ReleaseRefused as e:
             await interaction.edit_original_response(content=f":no_entry: {e}")
             return
@@ -198,7 +198,7 @@ class TimelineActions:
         return f":robot: Automatic last call: the join message is posted again in <#{ctf.join_channel_id}>."
 
     async def release(self, ctf: Ctf, now: datetime) -> str:
-        await release_ctf(self.guild, ctf, self.cog.settings.roles.member, now)
+        await release_ctf(self.guild, ctf, self.cog.settings.roles, now)
         return ":robot: Released automatically: every member can read and write in the CTF now, and joining is closed."
 
     async def lock(self, ctf: Ctf, now: datetime) -> str:

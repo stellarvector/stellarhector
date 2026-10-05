@@ -35,7 +35,7 @@ class LastCallTest(unittest.IsolatedAsyncioTestCase):
         self.upcoming.messages.append(self.join_message)
         store.set_join_message(ctf.id, self.upcoming.id, self.join_message.id)
 
-        self.player = FakeMember(self.guild, "sv{member}", "sv{core-player}")
+        self.player = FakeMember(self.guild, "sv{follower}", "sv{core-player}")
         store.add_player(ctf.id, self.player.id, utc(2026, 10, 1, 12))
         self.ctf = store.get(ctf.id)
 
@@ -56,7 +56,7 @@ class LastCallTest(unittest.IsolatedAsyncioTestCase):
 
     async def test_joining_on_the_new_message_shows_the_player_on_it(self):
         await self.last_call()
-        newcomer = FakeMember(self.guild, "sv{member}", "sv{known-player}")
+        newcomer = FakeMember(self.guild, "sv{follower}", "sv{known-player}")
 
         interaction = FakeInteraction(newcomer, self.guild, f"ctf:join:{self.ctf.id}")
         await players.JoinButton(self.ctf.id).callback(interaction)

@@ -34,8 +34,8 @@ class ApprovalCardTest(unittest.IsolatedAsyncioTestCase):
         store.set_join_message(self.ctf.id, upcoming.id, self.join_message.id)
         self.ctf = store.get(self.ctf.id)
 
-        self.player = FakeMember(self.guild, "sv{member}", "sv{player}")
-        self.moderator = FakeMember(self.guild, "sv{member}", "sv{moderator}")
+        self.player = FakeMember(self.guild, "sv{follower}", "sv{player}")
+        self.moderator = FakeMember(self.guild, "sv{follower}", "sv{moderator}")
         self.settings = SETTINGS
 
     def interaction(self, *args):
@@ -87,7 +87,7 @@ class ApprovalCardTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(
             card.content,
             f":raising_hand: <@{p}> wants to join **Foo CTF**\n"
-            f"**Roles:** <@&{self.guild.role('sv{player}').id}>, <@&{self.guild.role('sv{member}').id}>\n"
+            f"**Roles:** <@&{self.guild.role('sv{player}').id}>, <@&{self.guild.role('sv{follower}').id}>\n"
             f"**On the server since:** <t:1756728000:D> (<t:1756728000:R>)\n"
             f"**CTFs joined before:** 1",
         )
@@ -170,7 +170,7 @@ class ApprovalCardTest(unittest.IsolatedAsyncioTestCase):
     async def test_non_staff_cannot_decide(self):
         await self.join(self.player)
         [card] = self.cards()
-        core_player = FakeMember(self.guild, "sv{member}", "sv{core-player}")
+        core_player = FakeMember(self.guild, "sv{follower}", "sv{core-player}")
 
         for clicker in (core_player, self.player):
             with self.subTest(clicker=clicker.id):

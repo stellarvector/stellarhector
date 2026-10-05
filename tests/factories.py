@@ -20,7 +20,7 @@ SETTINGS = Settings.from_env(
         "CORE_PLAYER_ROLE": "sv{core-player}",
         "KNOWN_PLAYER_ROLE": "sv{known-player}",
         "PLAYER_ROLE": "sv{player}",
-        "MEMBER_ROLE": "sv{member}",
+        "FOLLOWER_ROLE": "sv{follower}",
         "CTF_ROLE_COLOR_HEX": "0x00ff00",
     }
 )

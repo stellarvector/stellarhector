@@ -13,7 +13,7 @@ class RolesTest(unittest.TestCase):
         core_player="sv{core}",
         known_player="sv{known}",
         player="sv{player}",
-        member="sv{member}",
+        follower="sv{follower}",
     )
 
     def test_groups(self):

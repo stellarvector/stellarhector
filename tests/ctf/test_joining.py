@@ -8,7 +8,7 @@ from tests.factories import ROLES
 
 
 def decide(*role_names, status=None, closed=False):
-    return joining.join_outcome({"@everyone", "sv{member}", *role_names}, ROLES, status, closed)
+    return joining.join_outcome({"@everyone", "sv{follower}", *role_names}, ROLES, status, closed)
 
 
 class DecideTest(unittest.TestCase):

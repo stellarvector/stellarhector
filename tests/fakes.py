@@ -105,7 +105,7 @@ class FakeGuild:
             FakeRole(name, position)
             for position, name in enumerate(
                 [
-                    "sv{member}",
+                    "sv{follower}",
                     "sv{player}",
                     "sv{known-player}",
                     "sv{core-player}",

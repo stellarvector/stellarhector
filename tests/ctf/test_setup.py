@@ -66,7 +66,9 @@ class FakeGuild:
         self.me = FakeRole(self, "Stellar Hector")
         self.roles = [self.default_role] + [
             FakeRole(self, name, position)
-            for position, name in enumerate(["sv{member}", "sv{moderator}", "sv{manager}", "sv{admin}"], 1)
+            for position, name in enumerate(
+                ["sv{follower}", "sv{player}", "sv{moderator}", "sv{manager}", "sv{admin}"], 1
+            )
         ]
         self.channels = []
         # Not in channels: it is there before any CTF is set up, and stays
@@ -140,13 +142,13 @@ class SetupCtfTest(unittest.IsolatedAsyncioTestCase):
         )
         return await setup.setup_ctf(guild, name, ctftime_id, settings, get_event=get_event)
 
-    async def test_creates_a_mentionable_role_above_the_member_role(self):
+    async def test_creates_a_mentionable_role_above_the_member_roles(self):
         await self.setup()
 
         role = self.guild.role("⚡ Foo CTF")
         self.assertEqual(role.color, discord.Color(0x00FF00))
         self.assertTrue(role.mentionable)
-        self.assertEqual(role.position, self.guild.role("sv{member}").position + 1)
+        self.assertEqual(role.position, self.guild.role("sv{player}").position + 1)
 
     async def test_category_is_only_visible_to_the_ctf_role_and_staff(self):
         await self.setup()
@@ -156,7 +158,8 @@ class SetupCtfTest(unittest.IsolatedAsyncioTestCase):
             g.channel("⚡ Foo CTF").overwrites,
             {
                 g.default_role: HIDDEN,
-                g.role("sv{member}"): HIDDEN,
+                g.role("sv{follower}"): HIDDEN,
+                g.role("sv{player}"): HIDDEN,
                 g.role("⚡ Foo CTF"): VISIBLE,
                 g.role("sv{admin}"): discord.PermissionOverwrite(view_channel=True, manage_channels=True),
                 g.role("sv{manager}"): VISIBLE,
@@ -185,7 +188,8 @@ class SetupCtfTest(unittest.IsolatedAsyncioTestCase):
             bot_channel.overwrites,
             {
                 g.default_role: HIDDEN,
-                g.role("sv{member}"): HIDDEN,
+                g.role("sv{follower}"): HIDDEN,
+                g.role("sv{player}"): HIDDEN,
                 g.role("⚡ Foo CTF"): HIDDEN,
                 g.role("sv{admin}"): VISIBLE,
                 g.role("sv{manager}"): VISIBLE,
@@ -304,14 +308,17 @@ class SetupCtfTest(unittest.IsolatedAsyncioTestCase):
 
                 self.assertEqual(
                     [role.name for role in guild.roles],
-                    ["@everyone", "sv{member}", "sv{moderator}", "sv{manager}", "sv{admin}"],
+                    ["@everyone", "sv{follower}", "sv{player}", "sv{moderator}", "sv{manager}", "sv{admin}"],
                 )
                 self.assertEqual(guild.channels, [])
                 self.assertEqual(guild.upcoming.messages, [])
                 self.assertIsNone(store.find(name="Foo CTF"))
 
     def assert_nothing_created(self):
-        self.assertEqual(len(self.guild.roles), 5)
+        self.assertEqual(
+            [role.name for role in self.guild.roles],
+            ["@everyone", "sv{follower}", "sv{player}", "sv{moderator}", "sv{manager}", "sv{admin}"],
+        )
         self.assertEqual(self.guild.channels, [])
         self.assertIsNone(store.find(name="Foo CTF"))
 

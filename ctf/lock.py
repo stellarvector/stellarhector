@@ -13,8 +13,8 @@ from core.settings import Roles
 from ctf import store
 from ctf.location import without_bot_channel
 from ctf.models import Ctf
-from ctf.permissions import update_category_overwrites
-from ctf.release import ReleaseRefused, release_ctf
+from ctf.permissions import member_roles, update_category_overwrites
+from ctf.release import NO_MEMBER_ROLES, ReleaseRefused, release_ctf
 from utils import discord_objects
 from utils.text import discord_time
 
@@ -56,20 +56,20 @@ async def lock_ctf(guild: discord.Guild, ctf: Ctf, roles: Roles, now: datetime, 
     category = cast(discord.CategoryChannel | None, guild.get_channel(ctf.category_id))
     if category is None:
         raise LockRefused(f"The category of **{name}** no longer exists.")
-    member_role = None if roles.member is None else discord.utils.get(guild.roles, name=roles.member)
-    if member_role is None:
-        raise LockRefused("The member role is not configured or no longer exists.")
+    members = member_roles(guild, roles)
+    if not members:
+        raise LockRefused(NO_MEMBER_ROLES)
 
     if stored.released_at is None:
         try:
-            await release_ctf(guild, ctf, roles.member, now)
+            await release_ctf(guild, ctf, roles, now)
         except ReleaseRefused as e:
             raise LockRefused(str(e)) from e
         # The cached category only reflects the release once Discord tells the bot about it; building on the cached
         # overwrites would hide the CTF from the members again
         category = cast(discord.CategoryChannel, await guild.fetch_channel(ctf.category_id))
 
-    readers = [role for role in (guild.default_role, member_role, guild.get_role(ctf.role_id)) if role is not None]
+    readers = [role for role in (guild.default_role, *members, guild.get_role(ctf.role_id)) if role is not None]
     writers = [role for role in guild.roles if role.name in roles.staff]
     # Staff are allowed explicitly: they are members too, and an allow on one role wins over a deny on another
     await update_category_overwrites(

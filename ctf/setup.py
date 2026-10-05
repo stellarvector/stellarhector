@@ -14,6 +14,7 @@ from ctf import store
 from ctf.buttons import join_view, leave_view
 from ctf.join_message import current_join_message
 from ctf.models import Ctf, NewCtf
+from ctf.permissions import member_roles
 from feeds import ctftime
 from utils import discord_objects
 
@@ -128,17 +129,18 @@ async def _create_discord_objects(
         return None if role_name is None else discord.utils.get(guild.roles, name=role_name)
 
     roles = settings.roles
-    member, admin = role(roles.member), role(roles.admin)
+    members, admin = member_roles(guild, roles), role(roles.admin)
     staff = [r for r in (admin, role(roles.manager), role(roles.moderator)) if r is not None]
 
     ctf_role = await guild.create_role(
         name=f"⚡ {name}", color=discord.Color(settings.ctf_role_color), mentionable=True
     )
     created.append(ctf_role)
-    if member is not None:
-        await ctf_role.edit(position=member.position + 1)
+    if members:
+        # Just above the members' roles
+        await ctf_role.edit(position=max(member.position for member in members) + 1)
 
-    hidden_for_everyone: Overwrites = {r: _HIDDEN for r in (guild.default_role, member) if r is not None}
+    hidden_for_everyone: Overwrites = {r: _HIDDEN for r in (guild.default_role, *members)}
     category_overwrites: Overwrites = {
         **hidden_for_everyone,
         ctf_role: _VISIBLE,

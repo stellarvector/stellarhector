@@ -39,9 +39,9 @@ class Roles:
     moderator: str | None = None
     core_player: str | None = None
     known_player: str | None = None
+    # Onboarding gives every team member one of these two
     player: str | None = None
-    # The role of every team member; a released CTF is opened to it
-    member: str | None = None
+    follower: str | None = None
 
     @property
     def admins(self) -> frozenset[str]:
@@ -56,6 +56,11 @@ class Roles:
     def staff(self) -> frozenset[str]:
         """Admins, managers and moderators."""
         return _names(self.admin, self.manager, self.moderator)
+
+    @property
+    def members(self) -> frozenset[str]:
+        """Every member of the team: players and followers. A released CTF is opened to them."""
+        return _names(self.player, self.follower)
 
     @property
     def trusted_players(self) -> frozenset[str]:
@@ -140,7 +145,7 @@ class Settings:
                 core_player=_text(env, "CORE_PLAYER_ROLE"),
                 known_player=_text(env, "KNOWN_PLAYER_ROLE"),
                 player=_text(env, "PLAYER_ROLE"),
-                member=_text(env, "MEMBER_ROLE"),
+                follower=_text(env, "FOLLOWER_ROLE"),
             ),
             channels=Channels(**{field: channel_id(env, key) for field, key in CHANNEL_KEYS.items()}),
             archive=ArchiveSettings(

@@ -1,4 +1,5 @@
 import unittest
+from dataclasses import replace
 
 import discord
 
@@ -6,7 +7,7 @@ from cogs import players
 from ctf import buttons, release, store
 from ctf.buttons import Decision
 from ctf.models import NewCtf, PlayerStatus
-from tests.factories import use_temporary_database, utc
+from tests.factories import ROLES, use_temporary_database, utc
 from tests.fakes import (
     FakeCategory,
     FakeCategoryChannel,
@@ -31,7 +32,7 @@ class ReleaseTest(unittest.IsolatedAsyncioTestCase):
         self.bot_user = object()
         everyone, member, ctf_role, manager = (
             self.guild.default_role,
-            self.guild.role("sv{member}"),
+            self.guild.role("sv{follower}"),
             self.guild.role("Foo CTF"),
             self.guild.role("sv{manager}"),
         )
@@ -73,28 +74,30 @@ class ReleaseTest(unittest.IsolatedAsyncioTestCase):
         self.upcoming.messages.append(self.join_message)
         store.set_join_message(ctf.id, self.upcoming.id, self.join_message.id)
 
-        self.player = FakeMember(self.guild, "sv{member}", "sv{core-player}")
+        self.player = FakeMember(self.guild, "sv{follower}", "sv{core-player}")
         store.add_player(ctf.id, self.player.id, utc(2026, 10, 1, 12))
         self.ctf = store.get(ctf.id)
 
     async def ask_to_join(self):
         """A plain player clicks Join: they wait on an approval card in #bot, which is returned."""
-        member = FakeMember(self.guild, "sv{member}", "sv{player}")
+        member = FakeMember(self.guild, "sv{follower}", "sv{player}")
         await players.JoinButton(self.ctf.id).callback(FakeInteraction(member, self.guild, f"ctf:join:{self.ctf.id}"))
         return member, self.bot_channel.messages[-1]
 
-    async def release(self, ctf=None, member_role="sv{member}"):
-        return await release.release_ctf(self.guild, ctf or self.ctf, member_role, NOW)
+    async def release(self, ctf=None, roles=ROLES):
+        return await release.release_ctf(self.guild, ctf or self.ctf, roles, NOW)
 
     async def test_members_can_read_and_write_in_the_ctf_channels_but_not_in_bot(self):
         bot_overwrites = dict(self.bot_channel.overwrites)
 
         await self.release()
 
-        member = self.category.overwrites[self.guild.role("sv{member}")]
-        self.assertEqual(member, _VISIBLE)
-        # Nothing denied: they write as they do anywhere on the server, also in the (public) challenge threads
-        self.assertEqual(member.pair()[1].value, 0)
+        for name in ("sv{player}", "sv{follower}"):
+            with self.subTest(name):
+                member = self.category.overwrites[self.guild.role(name)]
+                self.assertEqual(member, _VISIBLE)
+                # Nothing denied: they write as they do anywhere on the server, also in the (public) challenge threads
+                self.assertEqual(member.pair()[1].value, 0)
         for channel in (self.main, self.web):
             self.assertEqual(channel.overwrites, self.category.overwrites)
         self.assertEqual(self.bot_channel.overwrites, bot_overwrites)
@@ -146,7 +149,7 @@ class ReleaseTest(unittest.IsolatedAsyncioTestCase):
 
     async def test_a_click_on_a_closed_card_meanwhile_is_told_it_was_handled(self):
         waiting, card = await self.ask_to_join()
-        moderator = FakeMember(self.guild, "sv{member}", "sv{moderator}")
+        moderator = FakeMember(self.guild, "sv{follower}", "sv{moderator}")
         await self.release()
 
         interaction = FakeInteraction(moderator, self.guild, f"ctf:card:accept:{self.ctf.id}:{waiting.id}", card)
@@ -156,7 +159,7 @@ class ReleaseTest(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn(self.guild.role("Foo CTF"), waiting.roles)
 
     async def test_a_card_posted_while_releasing_is_closed_and_the_player_told_joining_is_closed(self):
-        waiting = FakeMember(self.guild, "sv{member}", "sv{player}")
+        waiting = FakeMember(self.guild, "sv{follower}", "sv{player}")
         send = self.bot_channel.send
 
         async def send_during_release(*args, **kwargs):
@@ -176,7 +179,7 @@ class ReleaseTest(unittest.IsolatedAsyncioTestCase):
 
     async def test_an_accept_that_fails_after_the_release_does_not_wait_again(self):
         waiting, card = await self.ask_to_join()
-        moderator = FakeMember(self.guild, "sv{member}", "sv{moderator}")
+        moderator = FakeMember(self.guild, "sv{follower}", "sv{moderator}")
         add_roles = waiting.add_roles
 
         async def fail_after_release(*roles):
@@ -200,7 +203,7 @@ class ReleaseTest(unittest.IsolatedAsyncioTestCase):
 
     async def test_a_second_run_changes_nothing_and_says_so(self):
         released = await self.release()
-        self.category.overwrites[self.guild.role("sv{member}")] = _HIDDEN
+        self.category.overwrites[self.guild.role("sv{follower}")] = _HIDDEN
         self.join_message.content = "join message"
 
         with self.assertRaisesRegex(release.ReleaseRefused, r"\*\*Foo CTF\*\* was already released"):
@@ -218,11 +221,18 @@ class ReleaseTest(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(self.category.edits, 1)
 
-    async def test_refused_without_the_member_role(self):
+    async def test_a_missing_follower_role_does_not_keep_the_players_out(self):
+        with self.assertLogs("bot", "WARNING"):
+            await self.release(roles=replace(ROLES, follower="sv{nonexistent}"))
+
+        self.assertEqual(self.category.overwrites[self.guild.role("sv{player}")], _VISIBLE)
+        self.assertEqual(store.get(self.ctf.id).released_at, NOW)
+
+    async def test_refused_without_any_member_role(self):
         for role in (None, "sv{nonexistent}"):
             with self.subTest(role):
-                with self.assertRaisesRegex(release.ReleaseRefused, "member role"):
-                    await self.release(member_role=role)
+                with self.assertRaisesRegex(release.ReleaseRefused, "player nor the follower role"):
+                    await self.release(roles=replace(ROLES, player=role, follower=role))
 
                 self.assertEqual(self.category.edits, 0)
                 self.assertIsNone(store.get(self.ctf.id).released_at)

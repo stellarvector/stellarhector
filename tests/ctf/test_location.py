@@ -94,7 +94,7 @@ class IsPlayerOrStaffTest(unittest.TestCase):
         self.ctf = new_ctf(role_id=self.ctf_role.id)
 
     def test_players_of_the_ctf_are(self):
-        self.assertTrue(is_player_or_staff(member(role("sv{member}"), self.ctf_role), self.ctf, ROLES.staff))
+        self.assertTrue(is_player_or_staff(member(role("sv{follower}"), self.ctf_role), self.ctf, ROLES.staff))
 
     def test_staff_are(self):
         for name in ROLES.staff:
@@ -104,7 +104,7 @@ class IsPlayerOrStaffTest(unittest.TestCase):
     def test_others_are_not(self):
         other_ctf_role = role("⚡ Bar CTF")
 
-        self.assertFalse(is_player_or_staff(member(role("sv{member}"), other_ctf_role), self.ctf, ROLES.staff))
+        self.assertFalse(is_player_or_staff(member(role("sv{follower}"), other_ctf_role), self.ctf, ROLES.staff))
 
 
 if __name__ == "__main__":
