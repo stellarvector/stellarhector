@@ -1,0 +1,32 @@
+{
+    "organizers": [
+        {
+            "id": 312315,
+            "name": "AlpacaHack"
+        }
+    ],
+    "ctftime_url": "https://ctftime.org/event/2500/",
+    "ctf_id": 1163,
+    "weight": 0,
+    "duration": {
+        "hours": 6,
+        "days": 0
+    },
+    "live_feed": "",
+    "logo": "https://ctftime.org/media/events/ctftime_6.png",
+    "id": 2500,
+    "title": "AlpacaHack Round 5 (Crypto)",
+    "start": "2024-10-12T03:00:00+00:00",
+    "participants": 0,
+    "location": "",
+    "finish": "2024-10-12T09:00:00+00:00",
+    "description": "AlpacaHack is a new CTF platform for individual competitions. AlpacaHack Round 5 (Crypto) is the 5th CTF hosted by the AlpacaHack team, featuring 4 Crypto challenges. The challenges are designed with a wide range of difficulties, making them enjoyable for participants of all levels, including beginners. The creators of these challenges will be announced later.",
+    "format": "Jeopardy",
+    "is_votable_now": false,
+    "prizes": "",
+    "format_id": 1,
+    "onsite": false,
+    "restrictions": "Individual",
+    "url": "https://alpacahack.com/ctfs/round-5",
+    "public_votable": false
+}

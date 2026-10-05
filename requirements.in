@@ -1,0 +1,18 @@
+# The bot's direct dependencies. requirements.txt pins these and everything they need; regenerate it after changing
+# this file, in the Python of the Docker image:
+#   docker run --rm -v "$PWD":/app -w /app python:3.11-slim sh -c \
+#     "pip install -q pip-tools && pip-compile --generate-hashes --strip-extras requirements.in"
+# Add --upgrade to move every pin to its latest version.
+discord.py
+aiohttp
+python-dotenv
+jinja2
+markdown
+pymdown-extensions
+nh3
+emoji
+# raise_if_error on push results
+gitpython>=3.1.30
+icalendar
+recurring-ical-events
+x-wr-timezone

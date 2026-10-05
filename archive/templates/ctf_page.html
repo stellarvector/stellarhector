@@ -1,0 +1,41 @@
+{% extends 'base.html' %}
+
+{% block title %}{{ page_name }} ({{ year }} / {{ ctf_name }}) - {{ super() }}{% endblock %}
+{% block stylesheet_level %}{{ stylesheet }}{% endblock %}
+{% block codehilite_stylesheet %}{{ codehilite_stylesheet }}{% endblock %}
+
+{% block navigation %}
+    <div id="navigation">
+        <div id="navtitle">
+            <div id="backbtn"><a href="{{ year_index }}">&lt;</a></div>
+            <span id="ctf">{{ year }} / {{ ctf_name }}</span>
+        </div>
+        <ul>
+            {% for channel in navigation -%}
+            <li>
+                <a href="{{ channel.link }}"># {{ channel.name }}</a>
+                {% if channel.challenges %}
+                <ul>
+                    {% for challenge in channel.challenges -%}
+                    <li><a href="{{ challenge.link }}">🧵 {{ challenge.name }}</a></li>
+                    {% endfor %}
+                </ul>
+                {% endif %}
+            </li>
+            {% endfor %}
+        </ul>
+    </div>
+{% endblock %}
+
+{% block content %}
+    <div id="title"><span id="hashtag">#</span><h1>{{ page_name }}</h1></div>
+    {% for message in messages -%}
+        {% if message.is_thread %}
+            {% include 'thread.html' %}
+        {% elif message.is_challenge_link %}
+            {% include 'challengelink.html' %}
+        {% else %}
+            {% include 'message.html' %}
+        {% endif %}
+    {% endfor %}
+{% endblock %}

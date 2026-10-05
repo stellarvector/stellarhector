@@ -1,0 +1,98 @@
+[
+    {
+        "organizers": [
+            {
+                "id": 127034,
+                "name": "IrisSec"
+            }
+        ],
+        "ctftime_url": "https://ctftime.org/event/2503/",
+        "ctf_id": 841,
+        "weight": 34.3,
+        "duration": {
+            "hours": 0,
+            "days": 2
+        },
+        "live_feed": "",
+        "logo": "https://ctftime.org//media/events/IrisSec.png",
+        "id": 2503,
+        "title": "IrisCTF 2025",
+        "start": "2025-01-04T00:00:00+00:00",
+        "participants": 155,
+        "location": "",
+        "finish": "2025-01-06T00:00:00+00:00",
+        "description": "IrisCTF is a 48-hour Capture the Flag competition organized by IrisSec. IrisCTF takes place the first full weekend of every year online, and features challenges in the disciplines of reverse engineering, binary exploitation, web exploitation, cryptography, radio frequency, networks, forensics, open-source intelligence, and more. IrisCTF is meant to be, above all else, a fun, lighthearted, and educational experience for all.\r\n\r\nIrisCTF 2025 starts at 2025-01-04 (Jan 4, 2025) @ 00:00 UTC and ends at 2025-01-06 (Jan 6, 2025) @ 00:00 UTC. Registration is open at https://2025.irisc.tf.\r\n\r\nInfra sponsored by goo.gle/ctfsponsorship.",
+        "format": "Jeopardy",
+        "is_votable_now": false,
+        "prizes": "The top 5 teams will each receive 3x commemorative tokens and event stickers. In addition, the top 3 teams will receive:\r\n\r\n1. US$512 cash, HTB 3x 1-Year VIP+ & 3x 3-Month Prolabs.\r\n2. US$256 cash, HTB 3x 1-Year VIP+ & 3x 1-Month Problabs.\r\n3. US$128 cash, HTB 3x 6-Month VIP+.\r\n\r\nWe will additionally host a writeup competition where 15x US$20 cash prizes will be awarded.\r\n\r\nSee Terms and Conditions: https://irisc.tf/assets/pdf/irisctf-2025-prize-tncs.pdf",
+        "format_id": 1,
+        "onsite": false,
+        "restrictions": "Open",
+        "url": "https://2025.irisc.tf/",
+        "public_votable": true
+    },
+    {
+        "organizers": [
+            {
+                "id": 139261,
+                "name": "UofTCTF"
+            }
+        ],
+        "ctftime_url": "https://ctftime.org/event/2570/",
+        "ctf_id": 1052,
+        "weight": 23.9,
+        "duration": {
+            "hours": 0,
+            "days": 2
+        },
+        "live_feed": "",
+        "logo": "https://ctftime.org//media/events/uoftctf_logo_3000_black.png",
+        "id": 2570,
+        "title": "UofTCTF 2025",
+        "start": "2025-01-11T00:00:00+00:00",
+        "participants": 141,
+        "location": "",
+        "finish": "2025-01-13T00:00:00+00:00",
+        "description": "UofTCTF 2025 is the annual capture-the-flag competition organized by the UofTCTF team. This year\u2019s event will take place online from January 10, 2025, at 7:00 PM EST to January 12, 2025, at 7:00 PM EST. It will be a jeopardy-style CTF with classic categories like web, pwn, crypto, rev, forensics, and misc. \r\n\r\nJoin the event discord server: https://discord.gg/4mQP8Tk3JE\r\n\r\nWe extend our heartfelt thanks to our sponsors for making this event possible:\r\n- Dataflow Security\r\n- Zellic\r\n- UofT ISEA\r\n- UofT DCS",
+        "format": "Jeopardy",
+        "is_votable_now": false,
+        "prizes": "Open Division:\r\nFirst Place: $1000 USD\r\nSecond Place: $750 USD\r\nThird Place: $500 USD\r\n\r\nUofT Division:\r\nFirst place: $350 CAD\r\nSecond place: $250 CAD\r\nThird place: $100 CAD\r\n\r\nWriteups:\r\n3x $50 USD",
+        "format_id": 1,
+        "onsite": false,
+        "restrictions": "Open",
+        "url": "https://ctf.uoftctf.org/",
+        "public_votable": true
+    },
+    {
+        "organizers": [
+            {
+                "id": 134746,
+                "name": "HKCERT"
+            }
+        ],
+        "ctftime_url": "https://ctftime.org/event/2583/",
+        "ctf_id": 529,
+        "weight": 0.0,
+        "duration": {
+            "hours": 3,
+            "days": 1
+        },
+        "live_feed": "",
+        "logo": "",
+        "id": 2583,
+        "title": "HKCERT CTF 2024 (Final Round)",
+        "start": "2025-01-20T01:30:00+00:00",
+        "participants": 3,
+        "location": "Hong Kong",
+        "finish": "2025-01-21T04:30:00+00:00",
+        "description": "",
+        "format": "Attack-Defense",
+        "is_votable_now": false,
+        "prizes": "",
+        "format_id": 2,
+        "onsite": true,
+        "restrictions": "Open",
+        "url": "https://ctf.hkcert.org/",
+        "public_votable": false
+    }
+]
