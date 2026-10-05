@@ -64,6 +64,17 @@ class BotTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual({command.name for command in bot.tree.get_commands(guild=bot.home)}, COMMANDS)
         self.assertEqual(bot.tree.get_commands(), [])
 
+    async def test_every_name_and_description_fits_discords_limits(self):
+        # Discord refuses to sync the commands at startup when one doesn't fit
+        bot = await started_bot()
+
+        for command in bot.tree.get_commands(guild=bot.home):
+            definition = command.to_dict(bot.tree)
+            for item in [definition, *definition["options"]]:
+                with self.subTest(command=command.name, item=item["name"]):
+                    self.assertLessEqual(len(item["name"]), 32)
+                    self.assertLessEqual(len(item["description"]), 100)
+
     async def test_failing_commands_get_the_error_reply(self):
         bot = await started_bot()
 

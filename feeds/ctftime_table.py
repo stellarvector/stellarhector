@@ -6,7 +6,7 @@ Everything except `post_table` is pure, so /ctftime-table and the monthly job bu
 import calendar
 import re
 from collections.abc import Awaitable, Callable, Iterable
-from datetime import date, datetime, timedelta
+from datetime import date, datetime
 from zoneinfo import ZoneInfo
 
 import discord
@@ -30,6 +30,11 @@ FORMAT_NAMES = {
 IN_CALENDAR = "✅"
 # The CTF has a session in the calendar, but at least one session no longer overlaps the CTF
 NOT_OVERLAPPING = "⚠️"
+# An online Jeopardy CTF that counts for the CTFtime rating: the kind the team plays most
+RECOMMENDED = "⭐"
+
+# Not %a: weekday names must not depend on the server's locale
+WEEKDAYS = ("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
 
 NO_EVENTS = "_No CTFs on CTFtime._"
 
@@ -43,10 +48,11 @@ LinkedSessions = Callable[[], dict[int, list[Session]]]
 
 
 def parse_start_month(value: str | None, today: date) -> YearMonth:
-    """Next month when `value` is None, else the month `value` gives as YYYY-MM or as a month number. A month number
-    means the next time that month comes around, the current month included. Raises ValueError for anything else."""
+    """The current month when `value` is None, else the month `value` gives as YYYY-MM or as a month number. A month
+    number means the next time that month comes around, the current month included. Raises ValueError for anything
+    else."""
     if value is None:
-        return _add_months((today.year, today.month), 1)
+        return today.year, today.month
 
     match = _MONTH_ARGUMENT.match(value.strip())
     if not match or not 1 <= int(match.group(2)) <= 12:
@@ -81,14 +87,17 @@ def mark(event: ctftime.Event, sessions: list[Session] | None) -> str | None:
     return NOT_OVERLAPPING
 
 
+def is_recommended(event: ctftime.Event) -> bool:
+    return not event.onsite and event.weight > 0 and event.format == "Jeopardy"
+
+
 def format_line(event: ctftime.Event, tz: str, event_mark: str | None = None) -> str:
-    """The fixed-width columns in inline code, then the mark and the CTFtime link without a preview."""
+    """The fixed-width columns in inline code, then the mark, the CTFtime link without a preview, and a star for a
+    recommended CTF."""
     zone = ZoneInfo(tz)
-    # A CTF finishing at midnight is over the day before
-    last_moment = max(event.start, event.finish - timedelta(seconds=1))
     columns = "  ".join(
         [
-            f"{event.start.astimezone(zone):%m-%d} → {last_moment.astimezone(zone):%m-%d}",
+            f"{_moment(event.start, zone)} -> {_moment(event.finish, zone)}",
             _cut(event.title, NAME_WIDTH),
             _cut(FORMAT_NAMES.get(event.format, event.format), FORMAT_WIDTH),
             f"{event.weight:5.1f}",
@@ -96,7 +105,8 @@ def format_line(event: ctftime.Event, tz: str, event_mark: str | None = None) ->
         ]
     )
     mark_part = f" {event_mark}" if event_mark else ""
-    return f"`{columns}`{mark_part} [ctftime](<{event.ctftime_url}>)"
+    star = f" {RECOMMENDED}" if is_recommended(event) else ""
+    return f"`{columns}`{mark_part} [ctftime](<{event.ctftime_url}>){star}"
 
 
 def table_lines(
@@ -164,17 +174,20 @@ async def post_table(
     start: YearMonth,
     count: int,
     tz: str,
+    hide_finished_at: datetime | None = None,
     list_events: ListEvents = ctftime.list_events,
     linked_sessions: LinkedSessions = linked_sessions,
 ) -> int:
-    """Post the table for `count` months from `start`, marking the CTFs that have sessions in the calendar. Returns
-    how many CTFs it lists.
+    """Post the table for `count` months from `start`, marking the CTFs that have sessions in the calendar. With
+    `hide_finished_at`, CTFs that finished before that moment are left out. Returns how many CTFs it lists.
 
     Raises CtftimeError before anything is posted when CTFtime can't be reached. A discord.HTTPException may come
     after some messages are already posted.
     """
     month_list = months(start, count)
     events = await list_events(*date_range(month_list, tz))
+    if hide_finished_at is not None:
+        events = [event for event in events if event.finish >= hide_finished_at]
     sessions = linked_sessions()
     marks = {event.id: mark(event, sessions.get(event.id)) for event in events}
 
@@ -182,6 +195,12 @@ async def post_table(
         # A CTF name must never ping anyone
         await channel.send(message, allowed_mentions=discord.AllowedMentions.none())
     return len(events)
+
+
+def _moment(moment: datetime, zone: ZoneInfo) -> str:
+    """Like "Fri 09/10 18:00", in `zone`."""
+    local = moment.astimezone(zone)
+    return f"{WEEKDAYS[local.weekday()]} {local:%d/%m %H:%M}"
 
 
 def _header(year: int, month: int, label: str) -> str:

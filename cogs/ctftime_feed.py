@@ -85,7 +85,9 @@ class CtftimeFeed(commands.Cog):
         start = ctftime_table.parse_start_month(None, self._today())
         channel = await self.bot.channel(channel_id)
         try:
-            await ctftime_table.post_table(channel, start, DEFAULT_MONTHS, self.settings.timezone)
+            await ctftime_table.post_table(
+                channel, start, DEFAULT_MONTHS, self.settings.timezone, hide_finished_at=datetime.now(UTC)
+            )
         except discord.HTTPException as e:
             # Part of the table may be posted already, so a retry could post it twice: tell the admins instead
             log.error(f"Monthly CTFtime table could not be posted: {e}")
@@ -106,7 +108,7 @@ class CtftimeFeed(commands.Cog):
     @app_commands.command(name="ctftime-table", description="Post the upcoming CTFs from CTFtime in #ctf-selection")
     @app_commands.rename(start_month="start-month")
     @app_commands.describe(
-        start_month="First month, as a month number (11) or YYYY-MM (2026-11); next month when left out",
+        start_month="First month, as 11 or 2026-11; when left out, this month without the CTFs that are over",
         months=f"How many months to list; {DEFAULT_MONTHS} when left out",
     )
     @checks.managers_only()
@@ -133,7 +135,11 @@ class CtftimeFeed(commands.Cog):
         await interaction.response.defer(thinking=True, ephemeral=True)
         channel = await self.bot.channel(channel_id)
         try:
-            count = await ctftime_table.post_table(channel, start, months, self.settings.timezone)
+            # Without an explicit start, the finished CTFs are clutter; with one, the table shows history too
+            hide_finished_at = datetime.now(UTC) if start_month is None else None
+            count = await ctftime_table.post_table(
+                channel, start, months, self.settings.timezone, hide_finished_at=hide_finished_at
+            )
         except CtftimeError as e:
             log.warning(f"/ctftime-table could not reach CTFtime: {e}")
             await interaction.edit_original_response(

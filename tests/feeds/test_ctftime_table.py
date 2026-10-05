@@ -3,8 +3,8 @@ import unittest
 from datetime import date
 
 from feeds import ctftime_table
+from feeds.calendar.sessions import Session
 from feeds.ctftime import CtftimeError, Event
-from feeds.ctftime_check import Session
 from tests.factories import utc
 
 TZ = "Europe/Brussels"
@@ -46,11 +46,9 @@ def code_part(line):
 
 
 class ParseStartMonthTest(unittest.TestCase):
-    def test_default_is_next_month(self):
-        self.assertEqual(ctftime_table.parse_start_month(None, date(2026, 10, 3)), (2026, 11))
-
-    def test_default_in_december_is_january(self):
-        self.assertEqual(ctftime_table.parse_start_month(None, date(2026, 12, 31)), (2027, 1))
+    def test_default_is_this_month(self):
+        self.assertEqual(ctftime_table.parse_start_month(None, date(2026, 10, 3)), (2026, 10))
+        self.assertEqual(ctftime_table.parse_start_month(None, date(2026, 12, 31)), (2026, 12))
 
     def test_year_and_month(self):
         self.assertEqual(ctftime_table.parse_start_month("2027-02", date(2026, 10, 3)), (2027, 2))
@@ -99,7 +97,8 @@ class FormatLineTest(unittest.TestCase):
 
         self.assertEqual(
             line,
-            "`11-07 → 11-09  Foo CTF 2026          Jeopardy   24.7  online` [ctftime](<https://ctftime.org/event/1/>)",
+            "`Sat 07/11 11:00 -> Mon 09/11 11:00  Foo CTF 2026          Jeopardy   24.7  online`"
+            " [ctftime](<https://ctftime.org/event/1/>) ⭐",
         )
 
     def test_every_line_has_the_same_width(self):
@@ -115,7 +114,8 @@ class FormatLineTest(unittest.TestCase):
     def test_long_name_is_cut_with_ellipsis(self):
         line = ctftime_table.format_line(event(title="A very long CTF name that goes on and on"), TZ)
 
-        name = code_part(line)[15 : 15 + ctftime_table.NAME_WIDTH]
+        dates = len("Sat 07/11 11:00 -> Mon 09/11 11:00  ")
+        name = code_part(line)[dates : dates + ctftime_table.NAME_WIDTH]
         self.assertEqual(name, "A very long CTF nam…")
 
     def test_name_that_fits_exactly_is_not_cut(self):
@@ -134,27 +134,33 @@ class FormatLineTest(unittest.TestCase):
     def test_onsite(self):
         self.assertIn("onsite`", ctftime_table.format_line(event(onsite=True), TZ))
 
-    def test_dates_are_in_the_timezone(self):
-        # 23:30 UTC on 30 November is already 1 December in Brussels
-        line = ctftime_table.format_line(event(start=utc(2026, 11, 30, 23, 30), finish=utc(2026, 12, 1, 23, 30)), TZ)
+    def test_start_and_finish_are_shown_in_the_timezone(self):
+        # CTFtime's times are UTC; Brussels is UTC+2 in summer time and UTC+1 after it
+        line = ctftime_table.format_line(event(start=utc(2026, 10, 9, 16), finish=utc(2026, 10, 30, 23, 30)), TZ)
 
-        self.assertTrue(line.startswith("`12-01 → 12-02"))
+        self.assertTrue(line.startswith("`Fri 09/10 18:00 -> Sat 31/10 00:30  "))
 
-    def test_ctf_finishing_at_midnight_ends_the_day_before(self):
-        # 23:00 UTC on 9 November is midnight in Brussels
+    def test_finish_at_midnight_shows_midnight(self):
         line = ctftime_table.format_line(event(start=utc(2026, 11, 7, 10), finish=utc(2026, 11, 9, 23)), TZ)
 
-        self.assertTrue(line.startswith("`11-07 → 11-09"))
-
-    def test_ctf_starting_and_finishing_at_midnight(self):
-        line = ctftime_table.format_line(event(start=utc(2026, 11, 7, 23), finish=utc(2026, 11, 7, 23)), TZ)
-
-        self.assertTrue(line.startswith("`11-08 → 11-08"))
+        self.assertTrue(line.startswith("`Sat 07/11 11:00 -> Tue 10/11 00:00  "))
 
     def test_mark_goes_between_code_and_link(self):
-        line = ctftime_table.format_line(event(), TZ, ctftime_table.IN_CALENDAR)
+        line = ctftime_table.format_line(event(weight=0), TZ, ctftime_table.IN_CALENDAR)
 
         self.assertTrue(line.endswith("online` ✅ [ctftime](<https://ctftime.org/event/1/>)"))
+
+    def test_online_rated_jeopardy_ctf_gets_a_star_at_the_very_end(self):
+        line = ctftime_table.format_line(event(), TZ, ctftime_table.IN_CALENDAR)
+
+        self.assertTrue(line.endswith("` ✅ [ctftime](<https://ctftime.org/event/1/>) ⭐"))
+
+    def test_no_star_for_onsite_unrated_or_other_formats(self):
+        for other in (event(onsite=True), event(weight=0), event(format="Attack-Defense")):
+            with self.subTest(other):
+                self.assertTrue(
+                    ctftime_table.format_line(other, TZ).endswith("[ctftime](<https://ctftime.org/event/1/>)")
+                )
 
 
 class MarkTest(unittest.TestCase):
@@ -319,8 +325,40 @@ class PostTableTest(unittest.TestCase):
         self.assertEqual(count, 1)
         self.assertEqual(requested, [(utc(2026, 10, 31, 23), utc(2026, 12, 31, 23))])
         self.assertEqual(len(channel.sent), 1)
-        self.assertTrue(channel.sent[0].startswith("**November 2026** (validate)\n`11-07"))
+        self.assertTrue(channel.sent[0].startswith("**November 2026** (validate)\n`Sat 07/11 11:00"))
         self.assertIn("**December 2026** (preview)", channel.sent[0])
+
+    def test_finished_ctfs_are_hidden_when_asked(self):
+        async def list_events(start, finish):
+            return [
+                event(1, start=utc(2026, 11, 1, 10), finish=utc(2026, 11, 3, 10)),
+                event(2, start=utc(2026, 11, 2, 10), finish=utc(2026, 11, 5, 10)),
+                event(3, start=utc(2026, 11, 20, 10), finish=utc(2026, 11, 21, 10)),
+            ]
+
+        def post(hide_finished_at):
+            channel = FakeChannel()
+            count = asyncio.run(
+                ctftime_table.post_table(
+                    channel,
+                    (2026, 11),
+                    1,
+                    TZ,
+                    hide_finished_at=hide_finished_at,
+                    list_events=list_events,
+                    linked_sessions=no_sessions,
+                )
+            )
+            return count, channel.sent[0]
+
+        count, table = post(utc(2026, 11, 4))
+        self.assertEqual(count, 2)
+        self.assertNotIn("event/1/", table)
+        self.assertIn("event/2/", table)
+
+        count, table = post(None)
+        self.assertEqual(count, 3)
+        self.assertIn("event/1/", table)
 
     def test_ctftime_error_posts_nothing(self):
         async def list_events(start, finish):
