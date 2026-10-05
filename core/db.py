@@ -1,20 +1,25 @@
+"""The bot's SQLite database: one shared connection, explicit transactions and numbered migration files."""
+
 import logging
 import re
 import sqlite3
+from collections.abc import Iterator
 from contextlib import contextmanager
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
+from typing import overload
+
+log = logging.getLogger("bot")
 
 MIGRATION_FILE = re.compile(r"^(\d+)_.*\.sql$")
-# Each migration file runs inside one transaction together with the user_version bump,
-# so a file must not contain its own BEGIN/COMMIT, and PRAGMA foreign_keys has no effect in it
+# Each migration file runs in one transaction together with the user_version bump, so a file must not contain its own
+# BEGIN or COMMIT, and PRAGMA foreign_keys has no effect in it
 MIGRATIONS_DIR = Path(__file__).parent / "migrations"
-DEFAULT_PATH = "./data/stellarhector.db"
 
-_conn = None
+_conn: sqlite3.Connection | None = None
 
 
-def init(path=DEFAULT_PATH, migrations_dir=MIGRATIONS_DIR):
+def init(path: str | Path, migrations_dir: str | Path = MIGRATIONS_DIR) -> None:
     global _conn
 
     conn = connect(path)
@@ -26,7 +31,7 @@ def init(path=DEFAULT_PATH, migrations_dir=MIGRATIONS_DIR):
     _conn = conn
 
 
-def close():
+def close() -> None:
     global _conn
 
     if _conn is not None:
@@ -35,10 +40,10 @@ def close():
 
 
 @contextmanager
-def transaction():
-    """Run queries in one transaction. Never await inside it: all code shares one connection.
+def transaction() -> Iterator[sqlite3.Connection]:
+    """Run the queries in the block in one transaction. Never await inside it, because all code shares one connection.
 
-    Only call it from the event loop thread (not from asyncio.to_thread work): the connection belongs to that thread.
+    Only use it on the event loop thread, not in asyncio.to_thread work, because the connection belongs to that thread.
     """
     if _conn is None:
         raise RuntimeError("Database not initialised, call db.init() first")
@@ -52,19 +57,26 @@ def transaction():
         raise
 
 
-def time_text(moment):
-    """moment as times are stored: a UTC ISO-8601 string. None stays None."""
-    return None if moment is None else moment.astimezone(timezone.utc).isoformat()
+def time_text(moment: datetime | None) -> str | None:
+    """Times are stored as UTC ISO-8601 strings."""
+    return None if moment is None else moment.astimezone(UTC).isoformat()
 
 
-def parse_time(text):
-    """The aware datetime stored as text by time_text. None stays None."""
+@overload
+def parse_time(text: str) -> datetime: ...
+
+
+@overload
+def parse_time(text: None) -> None: ...
+
+
+def parse_time(text: str | None) -> datetime | None:
     return None if text is None else datetime.fromisoformat(text)
 
 
-def connect(path):
+def connect(path: str | Path) -> sqlite3.Connection:
     Path(path).parent.mkdir(parents=True, exist_ok=True)
-    # isolation_level=None: no implicit transactions, we open them explicitly
+    # Without implicit transactions, so transaction() can open them explicitly
     conn = sqlite3.connect(path, isolation_level=None)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode = WAL")
@@ -72,8 +84,8 @@ def connect(path):
     return conn
 
 
-def _migrations(migrations_dir):
-    found = []
+def _migrations(migrations_dir: str | Path) -> list[tuple[int, Path]]:
+    found: list[tuple[int, Path]] = []
     for file in Path(migrations_dir).iterdir():
         match = MIGRATION_FILE.match(file.name)
         if match:
@@ -86,13 +98,13 @@ def _migrations(migrations_dir):
     return found
 
 
-def migrate(conn, migrations_dir):
+def migrate(conn: sqlite3.Connection, migrations_dir: str | Path) -> None:
     current = conn.execute("PRAGMA user_version").fetchone()[0]
     migrations = _migrations(migrations_dir)
 
     latest = migrations[-1][0] if migrations else 0
     if current > latest:
-        logging.getLogger("bot").warning(f"Database is at version {current}, newer than the latest migration {latest}")
+        log.warning(f"Database is at version {current}, newer than the latest migration {latest}")
 
     for version, file in migrations:
         if version <= current:
@@ -103,6 +115,6 @@ def migrate(conn, migrations_dir):
         except sqlite3.Error:
             if conn.in_transaction:
                 conn.rollback()
-            logging.getLogger("bot").critical(f"Database migration {file.name} failed, rolled back")
+            log.critical(f"Database migration {file.name} failed, rolled back")
             raise
-        logging.getLogger("bot").info(f"Applied database migration {file.name}")
+        log.info(f"Applied database migration {file.name}")

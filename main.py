@@ -1,77 +1,44 @@
 import logging
 from logging.handlers import RotatingFileHandler
-import core.bot as bot
-import core.commands as commands
-import core.config as config_helpers
-import core.db as db
-import core.events as events
-import core.scheduler as scheduler
-from utils import ctf_join
+
+import cogs
+from bot import Hector
+from core import db, settings
+
+LOG_FORMAT = "[%(asctime)s][%(levelname)-8s] %(message)-80s\t[%(pathname)s:%(funcName)s:%(lineno)d]"
+LOG_FILE_SIZE = 5 * 1024 * 1024
+LOG_FILE_COUNT = 10
+
+log = logging.getLogger("bot")
 
 
-LOAD_EVENTS = [
-    "on_ready",
-]
-LOAD_COMMANDS = [
-    "help",
-    "setup_ctf",
-    "add_category",
-    "create_challenge",
-    "add_player",
-    "remove_ctf",
-    "remove_player",
-    "last_call",
-    "solved",
-    "unsolve",
-    "archive_ctf",
-    "archive_channel",
-    "release_ctf",
-    "lock_ctf",
-    "ctf_status",
-    "ctf_timeline",
-    "ctftime_table",
-    "calendar_sync",
-    "ctftime_check",
-    "blog_check",
-]
+def init_logging(log_file: str | None) -> None:
+    log.setLevel(logging.DEBUG)
+    if log_file is None:
+        return
+
+    handler = RotatingFileHandler(log_file, maxBytes=LOG_FILE_SIZE, backupCount=LOG_FILE_COUNT, encoding="utf-8")
+    handler.setFormatter(logging.Formatter(LOG_FORMAT))
+    handler.setLevel(logging.DEBUG)
+    log.addHandler(handler)
 
 
-def init_logging():
-    log_formatter = logging.Formatter("[%(asctime)s][%(levelname)-8s] %(message)-80s\t[%(pathname)s:%(funcName)s:%(lineno)d]")
-    log_file = bot.config.get("LOG_FILE")
-    megabyte = 1024*1024
-
-    log_handler = RotatingFileHandler(log_file, mode='a', maxBytes=5*megabyte, backupCount=10, encoding='utf-8', delay=False)
-    log_handler.setFormatter(log_formatter)
-    log_handler.setLevel(logging.DEBUG)
-
-    bot_log = logging.getLogger("bot")
-    bot_log.setLevel(logging.DEBUG)
-    bot_log.addHandler(log_handler)
-
-if __name__ == "__main__":
-    init_logging()
-    logger = logging.getLogger("bot")
-
-    logger.info("BOT STARTING")
+def main() -> None:
+    env = settings.read_env()
+    init_logging(settings.Settings.log_file_in(env))
+    log.info("BOT STARTING")
 
     try:
-        db.init(bot.config.get("DATABASE_PATH") or db.DEFAULT_PATH)
-        scheduler.init(config_helpers.watchdog_limit(bot.config, scheduler.DEFAULT_WATCHDOG_LIMIT, scheduler.TICK_INTERVAL),
-                       alert=bot.alert_admins)
-        for key in bot.FEATURE_CHANNELS:
-            if bot.channel_id(key) is None:
-                logger.warning(f"{key} is not configured, the feature using it is switched off")
-        bot.init()
-        ctf_join.register(bot.client,
-                          ctf_join.JoinRoles(trusted=frozenset(bot.TRUSTED_PLAYER_ROLES), player=bot.PLAYER_ROLE),
-                          ctf_join.ApprovalRoles(staff=frozenset(bot.STAFF_ROLES), known_player=bot.KNOWN_PLAYER_ROLE))
-        events.load(LOAD_EVENTS)
-        events.register(LOAD_EVENTS)
-        commands.load(LOAD_COMMANDS)
-
-        logger.info("Bot configured, starting to run now")
-        bot.run()
-    except Exception as raised_exception:
-        logger.exception(f"UNCAUGHT CRITICAL EXCEPTION")
+        config = settings.Settings.from_env(env)
+        config.warn_switched_off()
+        db.init(config.database_path)
+        bot = Hector(config, cogs=cogs.ALL)
+        log.info("Bot configured, starting to run now")
+        bot.run(config.bot_token)
+    except Exception:
+        log.exception("UNCAUGHT CRITICAL EXCEPTION")
         raise
+
+
+if __name__ == "__main__":
+    main()

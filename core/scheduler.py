@@ -1,133 +1,156 @@
+"""The scheduler that runs the bot's periodic jobs, and the watchdog that restarts the bot when it hangs."""
+
 import asyncio
 import calendar
 import logging
 import os
 import threading
 import time
+from collections.abc import Awaitable, Callable, Iterable
 from dataclasses import dataclass
-from datetime import date, datetime, timedelta, timezone
+from datetime import UTC, date, datetime, timedelta
 from datetime import time as time_of_day
-from typing import Awaitable, Callable, Optional
+from typing import TypeVar
 from zoneinfo import ZoneInfo
 
 from discord.ext import tasks
 
 import core.db as db
+from utils.text import error_code
 
-# Ticks don't fire at exactly the same second each time, so a job counts as due
-# when its time is reached within this margin
+# Ticks don't fire at exactly the same second each time, so a job counts as due when its time is reached within this
+# margin
 TICK_SLACK = timedelta(minutes=1)
 
 TICK_INTERVAL = timedelta(minutes=5)
 DEFAULT_TIMEOUT = timedelta(minutes=4)
 DEFAULT_WATCHDOG_LIMIT = timedelta(minutes=20)
-# While a job runs the runner keeps beating this often, so a job may get a timeout longer than the watchdog limit
+# While a job runs, the runner beats this often, so a job's timeout may be longer than the watchdog limit
 JOB_BEAT_INTERVAL = timedelta(minutes=1)
 ALERT_TIMEOUT = timedelta(seconds=30)
-ALERT_ERROR_LENGTH = 500
 
 
-async def _log_alert(message):
-    logging.getLogger("bot").warning(f"No alert channel set up, alert not posted: {message}")
+log = logging.getLogger("bot")
+
+Alert = Callable[[str], Awaitable[None]]
+Heartbeat = Callable[[], None]
+IsDue = Callable[[datetime, datetime | None], bool]
+T = TypeVar("T")
 
 
-_jobs = []
-_watchdog_limit = DEFAULT_WATCHDOG_LIMIT
-_alert = _log_alert
-_tick_loop = None
+async def _log_alert(message: str) -> None:
+    log.warning(f"No alert channel set up, alert not posted: {message}")
 
 
 @dataclass
 class Job:
-    """When to run is decided by is_due; run should be a plain action that a slash command can call too.
+    """`run` should be a plain action that a slash command can call too. When `alert_after` is set, the admins are
+    alerted once the job has kept failing for that long."""
 
-    With alert_after set, one alert is posted once the job has kept failing for that long.
-    """
     name: str
-    is_due: Callable[[datetime, Optional[datetime]], bool]
-    run: Callable[[], Awaitable[None]]
+    is_due: IsDue
+    run: Callable[[], Awaitable[object]]
     timeout: timedelta = DEFAULT_TIMEOUT
-    alert_after: Optional[timedelta] = None
+    alert_after: timedelta | None = None
 
 
-def register(job):
-    _jobs.append(job)
+@dataclass(frozen=True)
+class JobState:
+    last_run_at: datetime | None = None
+    failing_since: datetime | None = None
+    alerted: bool = False
 
 
-def init(watchdog_limit=DEFAULT_WATCHDOG_LIMIT, alert=_log_alert):
-    """alert is an async function posting a message for the admins, used for jobs that keep failing."""
-    global _watchdog_limit, _alert
+class Scheduler:
+    """Runs the registered jobs in one TickLoop that a Watchdog guards. Features register their jobs before `start`.
+    `alert` posts a message for the admins about a job that keeps failing."""
 
-    # Ticks are TICK_INTERVAL apart, so a shorter limit would kill a healthy bot
-    if watchdog_limit <= TICK_INTERVAL:
-        raise ValueError(f"Watchdog limit {watchdog_limit} must be longer than the tick interval {TICK_INTERVAL}")
-    _watchdog_limit = watchdog_limit
-    _alert = alert
+    def __init__(self, watchdog_limit: timedelta = DEFAULT_WATCHDOG_LIMIT, alert: Alert = _log_alert) -> None:
+        # Ticks are TICK_INTERVAL apart, so a shorter limit would kill a healthy bot
+        if watchdog_limit <= TICK_INTERVAL:
+            raise ValueError(f"Watchdog limit {watchdog_limit} must be longer than the tick interval {TICK_INTERVAL}")
+        self.jobs: list[Job] = []
+        self.watchdog_limit = watchdog_limit
+        self.alert = alert
+        self._tick_loop: TickLoop | None = None
+
+    def register(self, job: Job) -> None:
+        self.jobs.append(job)
+
+    def start(self) -> None:
+        # Called on every on_ready, which fires again after a reconnect
+        if self._tick_loop is None:
+            watchdog = Watchdog(self.watchdog_limit)
+            watchdog.start()
+            self._tick_loop = TickLoop(self.jobs, watchdog, alert=self.alert)
+        self._tick_loop.start()
 
 
-def start():
-    """Start the tick loop and the watchdog. Safe to call on every on_ready."""
-    global _tick_loop
-
-    if _tick_loop is None:
-        watchdog = Watchdog(_watchdog_limit)
-        watchdog.start()
-        _tick_loop = TickLoop(_jobs, watchdog, alert=_alert)
-    _tick_loop.start()
-
-
-async def run_due_jobs(jobs, now, heartbeat=lambda: None, alert=_log_alert):
-    """Run every due job once. A job that fails or times out is logged and retried next tick,
-    and alerted once when it has failed for its alert_after."""
+async def run_due_jobs(
+    jobs: Iterable[Job], now: datetime, heartbeat: Heartbeat = lambda: None, alert: Alert = _log_alert
+) -> None:
+    """Run every due job once. A job that fails or times out is retried on the next tick. Once it has kept failing for
+    its `alert_after`, the admins are alerted, and they are told again when it works."""
     for job in jobs:
         # Beat per job, not per tick: the jobs of one tick together may run longer than the watchdog limit
         heartbeat()
         state = _job_state(job.name)
-        last_run_at = state["last_run_at"]
-        if not job.is_due(now, last_run_at):
-            if last_run_at is None:
-                # First time we see this job: remember it so a daily/monthly job runs from its next slot on
+        if not job.is_due(now, state.last_run_at):
+            if state.last_run_at is None:
+                # The first time a job is seen, it is recorded, so a daily or monthly job runs from its next slot on
                 _set_last_run_at(job.name, now)
             continue
 
         try:
-            await _beating_during(asyncio.wait_for(job.run(), timeout=job.timeout.total_seconds()), job.timeout, heartbeat)
+            await _beating_during(
+                asyncio.wait_for(job.run(), timeout=job.timeout.total_seconds()), job.timeout, heartbeat
+            )
         except Exception as error:
-            logging.getLogger("bot").exception(f"Scheduled job {job.name} failed (timeout {job.timeout})")
+            log.exception(f"Scheduled job {job.name} failed (timeout {job.timeout})")
             await _record_failure(job, state, now, error, alert)
             continue
 
-        _set_last_run_at(job.name, now)
+        # When the recovery can't be posted, it is tried again after the next successful run
+        still_alerted = state.alerted and not await _post_alert(
+            job, f":white_check_mark: Scheduled job `{job.name}` works again.", alert
+        )
+        _set_last_run_at(job.name, now, alerted=still_alerted)
 
 
-async def _record_failure(job, state, now, error, alert):
-    failing_since = state["failing_since"] or now
-    if state["failing_since"] is None:
+async def _record_failure(job: Job, state: JobState, now: datetime, error: Exception, alert: Alert) -> None:
+    failing_since = state.failing_since or now
+    if state.failing_since is None:
         _set_failing_since(job.name, now)
 
-    if job.alert_after is None or state["alerted"] or now - failing_since < job.alert_after:
+    if job.alert_after is None or state.alerted or now - failing_since < job.alert_after:
         return
 
-    # Error texts can be long or hold backticks, keep the message well under Discord's limit
-    error_text = f"{type(error).__name__}: {error}".replace("`", "'")[:ALERT_ERROR_LENGTH]
-    message = (f":warning: Scheduled job `{job.name}` has been failing since <t:{int(failing_since.timestamp())}:f>"
-               f" and is retried every tick. Last error: `{error_text}`")
+    message = (
+        f":warning: Scheduled job `{job.name}` has been failing since <t:{int(failing_since.timestamp())}:f>"
+        f" and is retried every tick. Last error: {error_code(error)}"
+    )
+    # An alert that couldn't be posted isn't marked as posted, so the next failing tick tries again
+    if await _post_alert(job, message, alert):
+        _set_alerted(job.name)
+
+
+async def _post_alert(job: Job, message: str, alert: Alert) -> bool:
     try:
         await asyncio.wait_for(alert(message), timeout=ALERT_TIMEOUT.total_seconds())
     except Exception:
-        # Not marked as alerted, so the next failing tick tries again
-        logging.getLogger("bot").exception(f"Could not post the alert for scheduled job {job.name}")
-        return
-    _set_alerted(job.name)
+        log.exception(f"Could not post the alert for scheduled job {job.name}")
+        return False
+    return True
 
 
-async def _beating_during(awaitable, timeout, heartbeat):
-    """Await while beating every JOB_BEAT_INTERVAL, for at most timeout.
+async def _beating_during(awaitable: Awaitable[T], timeout: timedelta, heartbeat: Heartbeat) -> T:
+    """Await `awaitable` while calling `heartbeat` every JOB_BEAT_INTERVAL, for at most `timeout`.
 
-    Beats stop after the timeout, so a job that swallows its cancellation and keeps the tick waiting
-    is still caught by the watchdog, as is a blocked event loop (no beats run then).
+    The beats stop after the timeout, so the watchdog still catches a job that swallows its cancellation and keeps the
+    tick waiting. It also catches a blocked event loop, because no beats run then.
     """
-    async def beat():
+
+    async def beat() -> None:
         beats = int(timeout / JOB_BEAT_INTERVAL)
         for _ in range(beats):
             await asyncio.sleep(JOB_BEAT_INTERVAL.total_seconds())
@@ -140,60 +163,58 @@ async def _beating_during(awaitable, timeout, heartbeat):
         beating.cancel()
 
 
-def _job_state(name):
+def _job_state(name: str) -> JobState:
     with db.transaction() as conn:
-        row = conn.execute("SELECT last_run_at, failing_since, alerted FROM job_runs WHERE name = ?", (name,)).fetchone()
+        row = conn.execute(
+            "SELECT last_run_at, failing_since, alerted FROM job_runs WHERE name = ?", (name,)
+        ).fetchone()
     if row is None:
-        return {"last_run_at": None, "failing_since": None, "alerted": False}
-    return {
-        "last_run_at": _parse_time(row["last_run_at"]),
-        "failing_since": _parse_time(row["failing_since"]),
-        "alerted": bool(row["alerted"]),
-    }
+        return JobState()
+    return JobState(
+        last_run_at=db.parse_time(row["last_run_at"]),
+        failing_since=db.parse_time(row["failing_since"]),
+        alerted=bool(row["alerted"]),
+    )
 
 
-def _parse_time(value):
-    return None if value is None else datetime.fromisoformat(value)
-
-
-def _set_last_run_at(name, when):
+def _set_last_run_at(name: str, when: datetime, alerted: bool = False) -> None:
     # A successful run ends the failure period
     with db.transaction() as conn:
         conn.execute(
-            "INSERT INTO job_runs (name, last_run_at) VALUES (?, ?) "
-            "ON CONFLICT (name) DO UPDATE SET last_run_at = excluded.last_run_at, failing_since = NULL, alerted = 0",
-            (name, when.astimezone(timezone.utc).isoformat()),
+            "INSERT INTO job_runs (name, last_run_at, alerted) VALUES (?, ?, ?) ON CONFLICT (name) DO UPDATE SET"
+            " last_run_at = excluded.last_run_at, failing_since = NULL, alerted = excluded.alerted",
+            (name, db.time_text(when), int(alerted)),
         )
 
 
-def _set_failing_since(name, when):
+def _set_failing_since(name: str, when: datetime) -> None:
     with db.transaction() as conn:
         conn.execute(
             "INSERT INTO job_runs (name, failing_since) VALUES (?, ?) "
             "ON CONFLICT (name) DO UPDATE SET failing_since = excluded.failing_since",
-            (name, when.astimezone(timezone.utc).isoformat()),
+            (name, db.time_text(when)),
         )
 
 
-def _set_alerted(name):
+def _set_alerted(name: str) -> None:
     with db.transaction() as conn:
         conn.execute("UPDATE job_runs SET alerted = 1 WHERE name = ?", (name,))
 
 
-def every_minutes(minutes):
+def every_minutes(minutes: int) -> IsDue:
     interval = timedelta(minutes=minutes)
 
-    def is_due(now, last_run_at):
+    def is_due(now: datetime, last_run_at: datetime | None) -> bool:
         return last_run_at is None or now - last_run_at >= interval - TICK_SLACK
 
     return is_due
 
 
-def daily_at(hh_mm, tz):
+def daily_at(hh_mm: str, tz: str) -> IsDue:
     at = time_of_day.fromisoformat(hh_mm)
     zone = ZoneInfo(tz)
 
-    def latest_slot(now):
+    def latest_slot(now: datetime) -> datetime:
         today = now.astimezone(zone).date()
         slot = datetime.combine(today, at, tzinfo=zone)
         if slot > now:
@@ -203,16 +224,16 @@ def daily_at(hh_mm, tz):
     return _slot_is_due(latest_slot)
 
 
-def monthly_on(day, hh_mm, tz):
-    """Day numbers past the end of a month (e.g. 31) mean the last day of that month."""
+def monthly_on(day: int, hh_mm: str, tz: str) -> IsDue:
     at = time_of_day.fromisoformat(hh_mm)
     zone = ZoneInfo(tz)
 
-    def slot_in(year, month):
+    def slot_in(year: int, month: int) -> datetime:
+        # A day past the end of the month, such as 31, means the last day of that month
         last_day = calendar.monthrange(year, month)[1]
         return datetime.combine(date(year, month, min(day, last_day)), at, tzinfo=zone)
 
-    def latest_slot(now):
+    def latest_slot(now: datetime) -> datetime:
         local = now.astimezone(zone)
         slot = slot_in(local.year, local.month)
         if slot > now:
@@ -223,84 +244,92 @@ def monthly_on(day, hh_mm, tz):
     return _slot_is_due(latest_slot)
 
 
-def _slot_is_due(latest_slot):
+def _slot_is_due(latest_slot: Callable[[datetime], datetime]) -> IsDue:
     # A job that never ran waits for its next slot; the runner records when it first saw the job
-    def is_due(now, last_run_at):
+    def is_due(now: datetime, last_run_at: datetime | None) -> bool:
         return last_run_at is not None and last_run_at < latest_slot(now)
 
     return is_due
 
 
-def _hard_exit():
+def _hard_exit() -> None:
     # os._exit skips cleanup that could itself hang; Docker's restart policy brings the bot back
     os._exit(1)
 
 
 class Watchdog:
-    """Kills the process when the tick loop stops beating, e.g. because the event loop is blocked.
-
-    It runs in a real thread so it keeps working while the asyncio event loop is stuck.
-    """
+    """Kills the process when the tick loop stops beating, for example because the event loop is blocked. It runs in
+    a real thread, so it keeps working while the asyncio event loop is stuck."""
 
     CHECK_EVERY = timedelta(minutes=1)
 
-    def __init__(self, limit, clock=time.monotonic, on_timeout=_hard_exit):
+    def __init__(
+        self, limit: timedelta, clock: Callable[[], float] = time.monotonic, on_timeout: Callable[[], None] = _hard_exit
+    ) -> None:
         self.limit = limit
         self.clock = clock
         self.on_timeout = on_timeout
         self.last_beat = clock()
 
-    def beat(self):
+    def beat(self) -> None:
         self.last_beat = self.clock()
 
-    def check(self):
+    def check(self) -> None:
         silent_for = self.clock() - self.last_beat
         if silent_for > self.limit.total_seconds():
-            logging.getLogger("bot").critical(f"No scheduler heartbeat for {silent_for:.0f}s, exiting so Docker restarts the bot")
+            log.critical(f"No scheduler heartbeat for {silent_for:.0f}s, exiting so Docker restarts the bot")
             self.on_timeout()
 
-    def start(self):
+    def start(self) -> None:
         threading.Thread(target=self._watch, name="watchdog", daemon=True).start()
 
-    def _watch(self):
+    def _watch(self) -> None:
         while True:
             time.sleep(self.CHECK_EVERY.total_seconds())
             self.check()
 
 
 class TickLoop:
-    """Wakes up every interval and runs the jobs that are due."""
-
-    def __init__(self, jobs, watchdog, interval=TICK_INTERVAL, restart_delay=None, alert=_log_alert):
+    def __init__(
+        self,
+        jobs: Iterable[Job],
+        watchdog: Watchdog,
+        interval: timedelta = TICK_INTERVAL,
+        restart_delay: timedelta | None = None,
+        alert: Alert = _log_alert,
+    ) -> None:
         self.jobs = jobs
         self.alert = alert
         self.restart_delay = interval if restart_delay is None else restart_delay
         self.watchdog = watchdog
         self._loop = tasks.loop(seconds=interval.total_seconds())(self._tick)
-        self._loop.error(self._on_error)
-        self._pending_restart = None
+        # discord.py types the handler as an unbound cog method; a bound method is called the same way
+        self._loop.error(self._on_error)  # type: ignore[type-var]
+        self._pending_restart: asyncio.TimerHandle | None = None
 
-    def start(self):
-        # on_ready fires again after a gateway reconnect, the loop must only run once
+    def start(self) -> None:
+        # on_ready fires again after a gateway reconnect, and the loop must only run once
         if not self._loop.is_running():
             self._loop.start()
 
-    async def stop(self):
+    async def stop(self) -> None:
         if self._pending_restart is not None:
             self._pending_restart.cancel()
         self._loop.cancel()
 
-    async def _on_error(self, error):
-        # tasks.loop stops for good after an uncaught exception, so start it again once this run has ended.
-        # Waiting first keeps a tick that keeps failing from spinning.
-        logging.getLogger("bot").error(f"Tick loop crashed, restarting in {self.restart_delay}", exc_info=error)
-        self._loop.get_task().add_done_callback(self._restart_later)
+    async def _on_error(self, error: BaseException) -> None:
+        # tasks.loop stops for good after an uncaught exception, so it is started again once this run has ended. The
+        # delay keeps a tick that keeps failing from spinning.
+        log.error(f"Tick loop crashed, restarting in {self.restart_delay}", exc_info=error)
+        task = self._loop.get_task()
+        if task is not None:
+            task.add_done_callback(self._restart_later)
 
-    def _restart_later(self, task):
+    def _restart_later(self, task: asyncio.Task[None]) -> None:
         if not task.cancelled():
-            task.exception()  # already logged above; stops asyncio from reporting it again
+            task.exception()  # Retrieving the logged exception stops asyncio from reporting it again
         self._pending_restart = asyncio.get_running_loop().call_later(self.restart_delay.total_seconds(), self.start)
 
-    async def _tick(self):
+    async def _tick(self) -> None:
         self.watchdog.beat()
-        await run_due_jobs(self.jobs, datetime.now(timezone.utc), heartbeat=self.watchdog.beat, alert=self.alert)
+        await run_due_jobs(self.jobs, datetime.now(UTC), heartbeat=self.watchdog.beat, alert=self.alert)
