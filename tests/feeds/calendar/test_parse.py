@@ -35,6 +35,17 @@ URL:https://example.com
             ],
         )
 
+    def test_html_description_becomes_plain_text_and_still_links_the_ctf(self):
+        occurrences = parse("""
+UID:meeting-1
+DTSTART:20261010T180000Z
+DTEND:20261010T200000Z
+DESCRIPTION:On campus<br><br><a href="https://ctftime.org/event/2345">https://ctftime.org/event/2345</a>
+""")
+
+        self.assertEqual(occurrences[0].description, "On campus\n\nhttps://ctftime.org/event/2345")
+        self.assertEqual(occurrences[0].ctftime_id, 2345)
+
     def test_utc_times_and_missing_fields(self):
         occurrences = parse("""
 UID:meeting-1

@@ -15,6 +15,7 @@ from icalendar.cal import Component
 
 from core import db
 from feeds import FeedError
+from feeds.calendar.description import plain_text
 from feeds.ctftime import parse_ctftime_id
 
 log = logging.getLogger("bot")
@@ -221,7 +222,7 @@ def _occurrence(event: Component, zone: ZoneInfo, recurring: set[str]) -> Occurr
         start=start,
         end=end,
         title=str(event.get("SUMMARY", "")),
-        description=str(event.get("DESCRIPTION", "")),
+        description=plain_text(str(event.get("DESCRIPTION", ""))),
         location=str(event.get("LOCATION", "")),
         url=str(event.get("URL", "")),
         slot=_slot(event.decoded("RECURRENCE-ID"), zone) if uid in recurring else None,
