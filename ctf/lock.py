@@ -14,11 +14,13 @@ from ctf import store
 from ctf.location import without_bot_channel
 from ctf.models import Ctf
 from ctf.permissions import member_roles, update_category_overwrites
-from ctf.release import NO_MEMBER_ROLES, ReleaseRefused, release_ctf
+from ctf.release import NO_MEMBER_ROLES, ReleaseRefused, announce_in_main_channel, release_ctf
 from utils import discord_objects
 from utils.text import discord_time
 
 log = logging.getLogger("bot")
+
+LOCKED_MESSAGE = "🔒 This CTF is over and locked. The channels stay readable, but nothing can be posted anymore."
 
 ArchiveCtf = Callable[[discord.Guild, Ctf, datetime], Awaitable[None]]
 
@@ -45,8 +47,8 @@ class Locked:
 
 async def lock_ctf(guild: discord.Guild, ctf: Ctf, roles: Roles, now: datetime, archive: ArchiveCtf) -> Locked:
     """Release the CTF if that hasn't happened yet, make it read-only for everyone but the staff, archive and lock its
-    threads, then archive it with `archive`. A failing archive doesn't undo the lock: it is returned, so it can be
-    retried with /archive-ctf."""
+    threads, announce it in the main channel, then archive it with `archive`. A failing archive doesn't undo the
+    lock: it is returned, so it can be retried with /archive-ctf."""
     name = discord.utils.escape_markdown(ctf.name)
     # Re-read: it may have been released or locked since `ctf` was read
     stored = store.reread(ctf.id)
@@ -62,7 +64,8 @@ async def lock_ctf(guild: discord.Guild, ctf: Ctf, roles: Roles, now: datetime, 
 
     if stored.released_at is None:
         try:
-            await release_ctf(guild, ctf, roles, now)
+            # The lock's own message follows, a welcome right before it would only confuse
+            await release_ctf(guild, ctf, roles, now, announce=False)
         except ReleaseRefused as e:
             raise LockRefused(str(e)) from e
         # The cached category only reflects the release once Discord tells the bot about it; building on the cached
@@ -86,6 +89,8 @@ async def lock_ctf(guild: discord.Guild, ctf: Ctf, roles: Roles, now: datetime, 
     if not store.mark_locked(ctf.id, now):
         raise _already_locked(name, store.reread(ctf.id))
     log.info(f"Locked CTF {ctf.name!r}")
+    # Before archiving, so the archive ends with it
+    await announce_in_main_channel(guild, ctf, LOCKED_MESSAGE)
 
     try:
         await archive(guild, ctf, now)

@@ -4,7 +4,7 @@ from dataclasses import replace
 
 import discord
 
-from ctf import buttons, lock, store
+from ctf import buttons, lock, release, store
 from ctf.models import NewCtf
 from tests.factories import ROLES, use_temporary_database, utc
 from tests.fakes import FakeCategory, FakeCategoryChannel, FakeGuild, FakeMessage, http_error
@@ -184,6 +184,34 @@ class LockTest(unittest.IsolatedAsyncioTestCase):
                 self.assertIs(overwrites[self.guild.role(name)].view_channel, True)
         self.assertIs(overwrites[self.guild.role("sv{admin}")].manage_channels, True)
         self.assertEqual(overwrites[self.bot_user], self.bot_overwrite)
+
+    async def test_the_lock_is_announced_in_the_main_channel_before_archiving(self):
+        archived_after = []
+        archive = self.archive
+
+        async def archive_and_look(guild, ctf, now):
+            archived_after.extend(m.content for m in self.main.messages)
+            await archive(guild, ctf, now)
+
+        self.archive = archive_and_look
+
+        await self.lock()
+
+        self.assertEqual([m.content for m in self.main.messages], [lock.LOCKED_MESSAGE])
+        self.assertEqual(archived_after, [lock.LOCKED_MESSAGE])
+        self.assertEqual(self.bot_channel.messages, [])
+
+    async def test_locking_an_unreleased_ctf_posts_no_welcome(self):
+        await self.lock()
+
+        self.assertNotIn(release.RELEASED_MESSAGE, [m.content for m in self.main.messages])
+
+    async def test_locking_a_released_ctf_posts_only_the_lock(self):
+        await release.release_ctf(self.guild, self.ctf, ROLES, NOW)
+
+        await self.lock()
+
+        self.assertEqual([m.content for m in self.main.messages], [release.RELEASED_MESSAGE, lock.LOCKED_MESSAGE])
 
     async def test_every_channel_but_bot_is_synced_to_the_category(self):
         await self.lock()

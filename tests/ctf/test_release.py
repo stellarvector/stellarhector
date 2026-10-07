@@ -195,6 +195,32 @@ class ReleaseTest(unittest.IsolatedAsyncioTestCase):
 
         self.assertIsNone(store.player(self.ctf.id, waiting.id))
 
+    async def test_members_are_welcomed_in_the_main_channel(self):
+        await self.release()
+
+        self.assertEqual([m.content for m in self.main.messages], [release.RELEASED_MESSAGE])
+        self.assertEqual(self.web.messages, [])
+        self.assertEqual(self.bot_channel.messages, [])
+
+    async def test_a_welcome_that_cannot_be_posted_is_logged_and_the_release_stays(self):
+        async def refuse(*args, **kwargs):
+            raise http_error(discord.HTTPException, 500)
+
+        self.main.send = refuse
+
+        with self.assertLogs("bot", "ERROR"):
+            ctf = await self.release()
+
+        self.assertEqual(ctf.released_at, NOW)
+
+    async def test_a_main_channel_deleted_by_hand_is_fine(self):
+        self.guild.channels.remove(self.main)
+
+        with self.assertLogs("bot", "WARNING"):
+            ctf = await self.release()
+
+        self.assertEqual(ctf.released_at, NOW)
+
     async def test_records_the_release_time(self):
         ctf = await self.release()
 

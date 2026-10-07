@@ -18,13 +18,15 @@ log = logging.getLogger("bot")
 
 
 NO_MEMBER_ROLES = "Neither the player nor the follower role is configured and on the server."
+RELEASED_MESSAGE = "🔓 This CTF is now open to all members. Welcome!"
 
 
 class ReleaseRefused(Exception):
     """Nothing changed; the message tells the user why."""
 
 
-async def release_ctf(guild: discord.Guild, ctf: Ctf, roles: Roles, now: datetime) -> Ctf:
+async def release_ctf(guild: discord.Guild, ctf: Ctf, roles: Roles, now: datetime, announce: bool = True) -> Ctf:
+    """Open the CTF to the members and close joining. With `announce`, the members are welcomed in its main channel."""
     name = discord.utils.escape_markdown(ctf.name)
     # Re-read: it may have been released since `ctf` was read
     if (stored := store.reread(ctf.id)).released_at is not None:
@@ -43,9 +45,23 @@ async def release_ctf(guild: discord.Guild, ctf: Ctf, roles: Roles, now: datetim
     if not store.mark_released(ctf.id, now):
         raise _already_released(name, store.reread(ctf.id))
     await close_joining(guild, ctf)
+    if announce:
+        await announce_in_main_channel(guild, ctf, RELEASED_MESSAGE)
 
     log.info(f"Released CTF {ctf.name!r}")
     return store.reread(ctf.id)
+
+
+async def announce_in_main_channel(guild: discord.Guild, ctf: Ctf, message: str) -> None:
+    """Post `message` in the CTF's main channel. The step it announces is done, so a failure is only logged."""
+    channel = cast(discord.TextChannel | None, guild.get_channel(ctf.main_channel_id))
+    if channel is None:
+        log.warning(f"The main channel of CTF {ctf.name!r} no longer exists, not announced: {message}")
+        return
+    try:
+        await channel.send(message, allowed_mentions=discord.AllowedMentions.none())
+    except discord.HTTPException:
+        log.exception(f"Could not announce in the main channel of CTF {ctf.name!r}: {message}")
 
 
 def _already_released(name: str, ctf: Ctf) -> ReleaseRefused:
