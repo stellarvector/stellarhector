@@ -73,8 +73,10 @@ async def lock_ctf(guild: discord.Guild, ctf: Ctf, roles: Roles, now: datetime, 
         category = cast(discord.CategoryChannel, await guild.fetch_channel(ctf.category_id))
 
     readers = [role for role in (guild.default_role, *members, guild.get_role(ctf.role_id)) if role is not None]
-    writers = [role for role in guild.roles if role.name in roles.staff]
-    # Staff are allowed explicitly: they are members too, and an allow on one role wins over a deny on another
+    # Staff are allowed explicitly: they are members too, and an allow on one role wins over a deny on another. So is
+    # the bot: Discord only lets it deny a permission in a channel when it has that permission in the category.
+    writers: list[discord.Role | discord.Member] = [role for role in guild.roles if role.name in roles.staff]
+    writers.append(guild.me)
     await update_category_overwrites(
         ctf,
         category,

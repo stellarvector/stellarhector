@@ -151,6 +151,11 @@ def set_overview_message(ctf_id: int, message_id: int) -> None:
         conn.execute("UPDATE ctfs SET overview_message_id = ? WHERE id = ?", (message_id, ctf_id))
 
 
+def set_credentials_message(ctf_id: int, message_id: int | None) -> None:
+    with db.transaction() as conn:
+        conn.execute("UPDATE ctfs SET credentials_message_id = ? WHERE id = ?", (message_id, ctf_id))
+
+
 def delete(ctf_id: int) -> None:
     """Deletes the CTF with its players, categories and challenges, as if it was never set up. Unlike `mark_removed`,
     this leaves no trace."""

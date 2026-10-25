@@ -36,6 +36,8 @@ class Ctf(NewCtf):
     join_message_id: int | None
     # The challenge overview in the main channel; None until the first challenge
     overview_message_id: int | None
+    # The credentials in the main channel, deleted before the release; None when there are none
+    credentials_message_id: int | None
     # When each lifecycle step was done; None until it is
     last_call_at: datetime | None
     released_at: datetime | None

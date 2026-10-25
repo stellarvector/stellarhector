@@ -54,7 +54,10 @@ _KEEP = object()
 
 class FakeMessage:
     def __init__(self, content, view=None):
-        self.id, self.content, self.view = next(_ids), content, view
+        self.id, self.content, self.view, self.pinned = next(_ids), content, view, False
+
+    async def pin(self):
+        self.pinned = True
 
     async def edit(self, content=_KEEP, view=_KEEP, allowed_mentions=None):
         if content is not _KEEP:
@@ -64,8 +67,10 @@ class FakeMessage:
 
 
 class FakeChannel:
+    """`delete_fails` makes Discord refuse to delete its messages."""
+
     def __init__(self, name):
-        self.id, self.name, self.messages = next(_ids), name, []
+        self.id, self.name, self.messages, self.delete_fails = next(_ids), name, [], False
 
     async def send(self, content, view=None, allowed_mentions=None):
         self.messages.append(FakeMessage(content, view))
@@ -95,7 +100,10 @@ class FakePartialMessage:
         await self._message().edit(content, view, allowed_mentions)
 
     async def delete(self):
-        self.channel.messages.remove(self._message())
+        message = self._message()
+        if self.channel.delete_fails:
+            raise http_error(discord.Forbidden, 403)
+        self.channel.messages.remove(message)
 
 
 class FakeGuild:

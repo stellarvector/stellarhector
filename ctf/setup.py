@@ -27,8 +27,14 @@ BOT_CHANNEL_NAME = "bot"
 
 _HIDDEN = discord.PermissionOverwrite(view_channel=False)
 _VISIBLE = discord.PermissionOverwrite(view_channel=True)
-# So the bot can post and pin in the CTF's channels even without Administrator
-_BOT = discord.PermissionOverwrite(view_channel=True, send_messages=True, manage_messages=True)
+# Challenge threads are made with /create-challenge only; the staff can still make threads by hand
+_NO_THREADS = {"create_public_threads": False, "create_private_threads": False}
+# Staff are allowed explicitly: they are members too, and an allow on one role wins over a deny on another
+_THREADS = {"create_public_threads": True, "create_private_threads": True}
+# So the bot can post, pin and make challenge threads in the CTF's channels even without Administrator
+_BOT = discord.PermissionOverwrite(
+    view_channel=True, send_messages=True, manage_messages=True, create_public_threads=True
+)
 
 # Two setups at the same time could both pass the duplicate check
 _lock = asyncio.Lock()
@@ -142,13 +148,13 @@ async def _create_discord_objects(
 
     hidden_for_everyone: Overwrites = {r: _HIDDEN for r in (guild.default_role, *members)}
     category_overwrites: Overwrites = {
-        **hidden_for_everyone,
-        ctf_role: _VISIBLE,
-        **{r: _VISIBLE for r in staff},
+        **{r: discord.PermissionOverwrite(view_channel=False, **_NO_THREADS) for r in hidden_for_everyone},
+        ctf_role: discord.PermissionOverwrite(view_channel=True, **_NO_THREADS),
+        **{r: discord.PermissionOverwrite(view_channel=True, **_THREADS) for r in staff},
         guild.me: _BOT,
     }
     if admin is not None:
-        category_overwrites[admin] = discord.PermissionOverwrite(view_channel=True, manage_channels=True)
+        category_overwrites[admin] = discord.PermissionOverwrite(view_channel=True, manage_channels=True, **_THREADS)
     category = await guild.create_category(f"⚡ {name}", overwrites=category_overwrites)
     created.append(category)
 

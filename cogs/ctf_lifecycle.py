@@ -39,6 +39,13 @@ def lock_notice(locked: Locked) -> str:
     )
 
 
+def with_credentials_note(notice: str, ctf: Ctf) -> str:
+    """The notice of a release or lock, saying the credentials were removed when `ctf`, as read before it, had them."""
+    if ctf.credentials_message_id is None:
+        return notice
+    return f"{notice}\nCredentials message removed."
+
+
 class CtfLifecycle(commands.Cog):
     def __init__(self, bot: Hector) -> None:
         self.bot = bot
@@ -111,7 +118,9 @@ class CtfLifecycle(commands.Cog):
             await interaction.edit_original_response(content=f":no_entry: {e}")
             return
 
-        await interaction.edit_original_response(content="Done; CTF released, welcome everyone! :wave:")
+        await interaction.edit_original_response(
+            content=with_credentials_note("Done; CTF released, welcome everyone! :wave:", ctf)
+        )
 
     @app_commands.command(name="lock-ctf", description="Make the CTF read-only and archive it")
     @checks.managers_only()
@@ -127,7 +136,7 @@ class CtfLifecycle(commands.Cog):
             await interaction.edit_original_response(content=f":no_entry: {e}")
             return
 
-        await reply_after_long_work(interaction, lock_notice(locked))
+        await reply_after_long_work(interaction, with_credentials_note(lock_notice(locked), ctf))
 
     @app_commands.command(name="archive-ctf", description="Archive a CTF")
     @checks.managers_only()
@@ -199,8 +208,11 @@ class TimelineActions:
 
     async def release(self, ctf: Ctf, now: datetime) -> str:
         await release_ctf(self.guild, ctf, self.cog.settings.roles, now)
-        return ":robot: Released automatically: every member can read and write in the CTF now, and joining is closed."
+        return with_credentials_note(
+            ":robot: Released automatically: every member can read and write in the CTF now, and joining is closed.",
+            ctf,
+        )
 
     async def lock(self, ctf: Ctf, now: datetime) -> str:
         locked = await lock_ctf(self.guild, ctf, self.cog.settings.roles, now, self.cog.archive)
-        return f":robot: Automatic lock: {lock_notice(locked)}"
+        return with_credentials_note(f":robot: Automatic lock: {lock_notice(locked)}", ctf)

@@ -14,6 +14,7 @@ Join a CTF with **Join** in #upcoming-ctfs, leave it with **Leave** on its guide
 **Staff**
 `/add-player`, `/remove-player` - Add or remove a player (CTF #bot)
 `/last-call` - Repost the join message as a last call (CTF #bot)
+`/post-credentials` - Post the CTF's credentials, deleted again before its release (CTF #bot or main channel)
 `/unsolve` - Mark a challenge unsolved (challenge thread)
 `/ctf-status` - Show the managed CTFs
 

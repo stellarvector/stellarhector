@@ -4,7 +4,7 @@ from dataclasses import replace
 
 import discord
 
-from ctf import buttons, lock, release, store
+from ctf import buttons, credentials, lock, release, store
 from ctf.models import NewCtf
 from tests.factories import ROLES, use_temporary_database, utc
 from tests.fakes import FakeCategory, FakeCategoryChannel, FakeGuild, FakeMessage, http_error
@@ -97,7 +97,7 @@ class LockTest(unittest.IsolatedAsyncioTestCase):
         use_temporary_database(self)
 
         self.guild = FakeGuild()
-        self.bot_user = object()
+        self.bot_user = self.guild.me = object()
         everyone, member, ctf_role = (
             self.guild.default_role,
             self.guild.role("sv{follower}"),
@@ -183,7 +183,15 @@ class LockTest(unittest.IsolatedAsyncioTestCase):
                 self.assert_can_write(overwrites[self.guild.role(name)])
                 self.assertIs(overwrites[self.guild.role(name)].view_channel, True)
         self.assertIs(overwrites[self.guild.role("sv{admin}")].manage_channels, True)
-        self.assertEqual(overwrites[self.bot_user], self.bot_overwrite)
+
+    async def test_the_bot_keeps_every_permission_it_denies_so_it_can_sync_the_channels(self):
+        # Discord only lets the bot allow or deny a permission in a channel when it has it in the category
+        await self.lock()
+
+        overwrite = self.category.overwrites[self.bot_user]
+        self.assert_can_write(overwrite)
+        self.assertIs(overwrite.view_channel, True)
+        self.assertIs(overwrite.manage_messages, True)
 
     async def test_the_lock_is_announced_in_the_main_channel_before_archiving(self):
         archived_after = []
@@ -247,6 +255,31 @@ class LockTest(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(locked.released_at, NOW)
         self.assertIn("**Joining is closed:**", self.join_message.content)
+
+    async def test_the_credentials_of_a_ctf_that_was_not_released_are_deleted_before_archiving(self):
+        await credentials.post_credentials(self.guild, self.ctf, "pass: hunter2")
+        archived_after = []
+        archive = self.archive
+
+        async def archive_and_look(guild, ctf, now):
+            archived_after.extend(m.content for m in self.main.messages)
+            await archive(guild, ctf, now)
+
+        self.archive = archive_and_look
+
+        await self.lock()
+
+        self.assertEqual(archived_after, [lock.LOCKED_MESSAGE])
+
+    async def test_refused_and_nothing_changed_when_the_credentials_cannot_be_deleted(self):
+        await credentials.post_credentials(self.guild, self.ctf, "pass: hunter2")
+        self.main.delete_fails = True
+
+        with self.assertRaisesRegex(lock.LockRefused, "credentials"):
+            await self.lock()
+
+        self.assertEqual(self.category.edits, 0)
+        self.assertIsNone(store.get(self.ctf.id).locked_at)
 
     async def test_a_released_ctf_is_locked_as_it_is(self):
         store.mark_released(self.ctf.id, utc(2026, 10, 14, 8))

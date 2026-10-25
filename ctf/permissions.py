@@ -10,8 +10,8 @@ from ctf.models import Ctf
 
 log = logging.getLogger("bot")
 
-# Per role: permission name -> allowed (True), denied (False) or inherited (None)
-PermissionChanges = Mapping[discord.Role, Mapping[str, bool | None]]
+# Per role (or member, such as the bot): permission name -> allowed (True), denied (False) or inherited (None)
+PermissionChanges = Mapping[discord.Role | discord.Member, Mapping[str, bool | None]]
 
 
 async def update_category_overwrites(ctf: Ctf, category: discord.CategoryChannel, changes: PermissionChanges) -> None:

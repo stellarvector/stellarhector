@@ -87,6 +87,7 @@ def stored_ctf(**changes):
         join_channel_id=None,
         join_message_id=None,
         overview_message_id=None,
+        credentials_message_id=None,
         last_call_at=None,
         released_at=None,
         locked_at=None,

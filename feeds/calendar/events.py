@@ -36,7 +36,7 @@ TITLE_LIMIT = 256
 CANCELLED_MESSAGE = "❌ This event has been cancelled."
 DOWNLOAD_TIMEOUT = aiohttp.ClientTimeout(total=30)
 
-# The creates and edits of syncs that were stopped halfway
+# The creates and edits of syncs that were stopped  halfway
 _unfinished = UnfinishedWork()
 
 Fetch = Callable[[str], Awaitable[bytes]]

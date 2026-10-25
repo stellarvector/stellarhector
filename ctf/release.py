@@ -8,7 +8,7 @@ from typing import cast
 import discord
 
 from core.settings import Roles
-from ctf import store
+from ctf import credentials, store
 from ctf.joining import close_joining
 from ctf.models import Ctf
 from ctf.permissions import member_roles, update_category_overwrites
@@ -39,11 +39,17 @@ async def release_ctf(guild: discord.Guild, ctf: Ctf, roles: Roles, now: datetim
     if not members:
         raise ReleaseRefused(NO_MEMBER_ROLES)
 
-    # Sending is not denied, so members write as they do elsewhere on the server; public threads follow their channel
-    await update_category_overwrites(ctf, category, {role: {"view_channel": True} for role in members})
-    # A command and the timeline releasing at the same time: only one gets here
-    if not store.mark_released(ctf.id, now):
-        raise _already_released(name, store.reread(ctf.id))
+    try:
+        # Before the members see the main channel, and no new credentials are posted until the CTF is marked released
+        async with credentials.removed(guild, ctf):
+            # Sending is not denied, so members write as they do elsewhere on the server; public threads follow their
+            # channel
+            await update_category_overwrites(ctf, category, {role: {"view_channel": True} for role in members})
+            # A command and the timeline releasing at the same time: only one gets here
+            if not store.mark_released(ctf.id, now):
+                raise _already_released(name, store.reread(ctf.id))
+    except credentials.CredentialsRefused as e:
+        raise ReleaseRefused(f"{e}\nNothing changed: **{name}** is not released.") from e
     await close_joining(guild, ctf)
     if announce:
         await announce_in_main_channel(guild, ctf, RELEASED_MESSAGE)

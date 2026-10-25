@@ -4,7 +4,7 @@ from dataclasses import replace
 import discord
 
 from cogs import players
-from ctf import buttons, release, store
+from ctf import buttons, credentials, release, store
 from ctf.buttons import Decision
 from ctf.models import NewCtf, PlayerStatus
 from tests.factories import ROLES, use_temporary_database, utc
@@ -303,6 +303,37 @@ class ReleaseTest(unittest.IsolatedAsyncioTestCase):
             await self.release()
 
         self.assertIsNone(second.view)
+
+    async def post_credentials(self):
+        return await credentials.post_credentials(self.guild, self.ctf, "pass: hunter2")
+
+    async def test_the_credentials_are_deleted(self):
+        posted = await self.post_credentials()
+
+        await self.release()
+
+        self.assertNotIn(posted, self.main.messages)
+        self.assertIsNone(store.get(self.ctf.id).credentials_message_id)
+
+    async def test_credentials_deleted_by_hand_are_fine(self):
+        await self.post_credentials()
+        self.main.messages.clear()
+
+        ctf = await self.release()
+
+        self.assertEqual(ctf.released_at, NOW)
+        self.assertIsNone(ctf.credentials_message_id)
+
+    async def test_refused_and_nothing_changed_when_the_credentials_cannot_be_deleted(self):
+        posted = await self.post_credentials()
+        self.main.delete_fails = True
+
+        with self.assertRaisesRegex(release.ReleaseRefused, "credentials"):
+            await self.release()
+
+        self.assertIn(posted, self.main.messages)
+        self.assertEqual(self.category.edits, 0)
+        self.assertIsNone(store.get(self.ctf.id).released_at)
 
 
 if __name__ == "__main__":

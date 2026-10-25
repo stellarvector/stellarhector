@@ -104,7 +104,13 @@ class FakeGuild:
 
 HIDDEN = discord.PermissionOverwrite(view_channel=False)
 VISIBLE = discord.PermissionOverwrite(view_channel=True)
-BOT = discord.PermissionOverwrite(view_channel=True, send_messages=True, manage_messages=True)
+BOT = discord.PermissionOverwrite(
+    view_channel=True, send_messages=True, manage_messages=True, create_public_threads=True
+)
+# Only the bot (for /create-challenge) and the staff make threads in the CTF's channels
+NO_THREADS = {"create_public_threads": False, "create_private_threads": False}
+# Allowed explicitly: an allow on one role wins over the deny on @everyone and the member roles
+THREADS = {"create_public_threads": True, "create_private_threads": True}
 
 
 def event(title="Foo CTF 2026"):
@@ -157,13 +163,13 @@ class SetupCtfTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(
             g.channel("⚡ Foo CTF").overwrites,
             {
-                g.default_role: HIDDEN,
-                g.role("sv{follower}"): HIDDEN,
-                g.role("sv{player}"): HIDDEN,
-                g.role("⚡ Foo CTF"): VISIBLE,
-                g.role("sv{admin}"): discord.PermissionOverwrite(view_channel=True, manage_channels=True),
-                g.role("sv{manager}"): VISIBLE,
-                g.role("sv{moderator}"): VISIBLE,
+                g.default_role: discord.PermissionOverwrite(view_channel=False, **NO_THREADS),
+                g.role("sv{follower}"): discord.PermissionOverwrite(view_channel=False, **NO_THREADS),
+                g.role("sv{player}"): discord.PermissionOverwrite(view_channel=False, **NO_THREADS),
+                g.role("⚡ Foo CTF"): discord.PermissionOverwrite(view_channel=True, **NO_THREADS),
+                g.role("sv{admin}"): discord.PermissionOverwrite(view_channel=True, manage_channels=True, **THREADS),
+                g.role("sv{manager}"): discord.PermissionOverwrite(view_channel=True, **THREADS),
+                g.role("sv{moderator}"): discord.PermissionOverwrite(view_channel=True, **THREADS),
                 g.me: BOT,
             },
         )

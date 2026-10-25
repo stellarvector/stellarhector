@@ -41,6 +41,7 @@ COMMANDS = {
     "create-challenge",
     "solved",
     "unsolve",
+    "post-credentials",
     "archive-channel",
     "ctftime-check",
     "ctftime-table",

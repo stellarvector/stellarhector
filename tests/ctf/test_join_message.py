@@ -20,6 +20,7 @@ CTF = Ctf(
     join_channel_id=6,
     join_message_id=7,
     overview_message_id=None,
+    credentials_message_id=None,
     last_call_at=None,
     released_at=None,
     locked_at=None,
